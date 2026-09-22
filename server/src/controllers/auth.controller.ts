@@ -1,77 +1,69 @@
 import { Request, Response } from "express";
-import { User } from "../models/User.js";
+import { User } from "../models/User";
 import {
+  hashPassword,
   comparePassword,
   generateToken,
-  hashPassword,
-} from "../services/auth.service.js";
+} from "../services/auth.service";
 import { AuthRequest } from "../middleware/auth.middleware.js";
 
 export const register = async (
   req: Request,
   res: Response
-): Promise<void> => {
+) => {
   try {
     const { name, email, password } = req.body;
 
+    // Validate input
     if (!name || !email || !password) {
-      res.status(400).json({
-        success: false,
+      return res.status(400).json({
         message: "Name, email and password are required",
       });
-      return;
     }
 
-    if (password.length < 8) {
-      res.status(400).json({
-        success: false,
-        message: "Password must be at least 8 characters",
-      });
-      return;
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
-
-    const existingUser = await User.findOne({
-      email: normalizedEmail,
-    });
+    // Check existing user
+    const existingUser = await User.findOne({ email });
 
     if (existingUser) {
-      res.status(409).json({
-        success: false,
+      return res.status(409).json({
         message: "User already exists",
       });
-      return;
     }
 
-    const passwordHash = await hashPassword(password);
+    // Hash password
+    const hashedPassword = await hashPassword(password);
 
-    const user = await User.create({
-      name: name.trim(),
-      email: normalizedEmail,
-      passwordHash,
+    console.log("Register debug:", {
+      name,
+      email,
+      passwordProvided: !!password,
+      hashCreated: !!hashedPassword,
     });
 
+    // Create user
+    const user = await User.create({
+      name,
+      email,
+      password: hashedPassword,
+    });
+
+    // Generate JWT
     const token = generateToken(user._id.toString());
 
-    res.status(201).json({
-      success: true,
-      message: "User registered successfully",
-      data: {
-        token,
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-        },
+    return res.status(201).json({
+      message: "Registration successful",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
       },
     });
   } catch (error) {
     console.error("Register error:", error);
 
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
+    return res.status(500).json({
+      message: "Registration failed",
     });
   }
 };
@@ -91,29 +83,23 @@ export const login = async (
       return;
     }
 
-    const user = await User.findOne({
-      email: email.toLowerCase().trim(),
-    }).select("+passwordHash");
+   const user = await User.findOne({ email });
 
     if (!user) {
-      res.status(401).json({
-        success: false,
-        message: "Invalid credentials",
+      return res.status(401).json({
+        message: "Invalid email or password",
       });
-      return;
     }
 
     const isPasswordValid = await comparePassword(
       password,
-      user.passwordHash
+      user.password
     );
 
     if (!isPasswordValid) {
-      res.status(401).json({
-        success: false,
-        message: "Invalid credentials",
+      return res.status(401).json({
+        message: "Invalid email or password",
       });
-      return;
     }
 
     const token = generateToken(user._id.toString());
@@ -143,33 +129,37 @@ export const login = async (
 export const getCurrentUser = async (
   req: AuthRequest,
   res: Response
-): Promise<void> => {
+) => {
   try {
-    const user = await User.findById(req.userId);
+    const userId = req.user?.userId;
 
-    if (!user) {
-      res.status(404).json({
-        success: false,
-        message: "User not found",
+    if (!userId) {
+      return res.status(401).json({
+        message: "Authentication required",
       });
-      return;
     }
 
-    res.status(200).json({
-      success: true,
-      data: {
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          avatarUrl: user.avatarUrl,
-        },
+    const user = await User.findById(userId).select("-password");
+
+    if (!user) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    return res.json({
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        githubUsername: user.githubUsername,
       },
     });
-  } catch {
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
+  } catch (error) {
+    console.error("Get current user error:", error);
+
+    return res.status(500).json({
+      message: "Failed to get current user",
     });
   }
 };

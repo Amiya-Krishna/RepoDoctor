@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { useState, type FormEvent } from "react";
 import { api } from "./lib/api";
 
 function App() {
@@ -6,7 +6,7 @@ function App() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
 
-  const handleLogin = async (event: FormEvent) => {
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     try {
@@ -23,9 +23,30 @@ function App() {
       setMessage("Login successful");
     } catch (error: any) {
       setMessage(
-        error.response?.data?.message ||
-          "Login failed"
+        error.response?.data?.message || "Login failed"
       );
+    }
+  };
+
+  const connectGitHub = async () => {
+    try {
+      const token = localStorage.getItem("token");
+
+      if (!token) {
+        setMessage("Please login first");
+        return;
+      }
+
+      const response = await api.get("/github/connect", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      window.location.href = response.data.authUrl;
+    } catch (error) {
+      console.error(error);
+      setMessage("Failed to connect GitHub");
     }
   };
 
@@ -33,21 +54,22 @@ function App() {
     <main>
       <h1>RepoDoctor AI</h1>
 
+      {/* Login */}
       <form onSubmit={handleLogin}>
         <input
           type="email"
           placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          required
         />
 
         <input
           type="password"
           placeholder="Password"
           value={password}
-          onChange={(e) =>
-            setPassword(e.target.value)
-          }
+          onChange={(e) => setPassword(e.target.value)}
+          required
         />
 
         <button type="submit">
@@ -55,7 +77,12 @@ function App() {
         </button>
       </form>
 
-      <p>{message}</p>
+      {/* GitHub */}
+      <button onClick={connectGitHub}>
+        Connect GitHub
+      </button>
+
+      {message && <p>{message}</p>}
     </main>
   );
 }

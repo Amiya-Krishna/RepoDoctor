@@ -3,11 +3,11 @@ import mongoose, { Document, Schema } from "mongoose";
 export interface IUser extends Document {
   name: string;
   email: string;
-  passwordHash: string;
+  password: string;
+
   githubId?: string;
-  avatarUrl?: string;
-  createdAt: Date;
-  updatedAt: Date;
+  githubUsername?: string;
+  githubAccessToken?: string;
 }
 
 const userSchema = new Schema<IUser>(
@@ -26,10 +26,9 @@ const userSchema = new Schema<IUser>(
       trim: true,
     },
 
-    passwordHash: {
+    password: {
       type: String,
       required: true,
-      select: false,
     },
 
     githubId: {
@@ -38,7 +37,11 @@ const userSchema = new Schema<IUser>(
       sparse: true,
     },
 
-    avatarUrl: {
+    githubUsername: {
+      type: String,
+    },
+
+    githubAccessToken: {
       type: String,
     },
   },
