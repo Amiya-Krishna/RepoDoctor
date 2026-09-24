@@ -1,21 +1,29 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: repodoctor-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: repodoctor
-      POSTGRES_PASSWORD: repodoctor
-      POSTGRES_DB: repodoctor
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U repodoctor -d repodoctor"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
 
-volumes:
-  postgres_data:
+  server:
+    build:
+      context: .
+      dockerfile: docker/server/Dockerfile
+
+    ports:
+      - "5000:5000"
+
+    env_file:
+      - ./server/.env
+
+    volumes:
+      - ./server:/app/server
+      - /app/server/node_modules
+
+    restart: unless-stopped
+
+  analysis:
+    build:
+      context: .
+      dockerfile: docker/analysis/Dockerfile
+
+    working_dir: /workspace
+
+    command: ["node", "--version"]
+
+    restart: "no"
