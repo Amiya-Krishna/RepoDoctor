@@ -1,0 +1,77 @@
+// Prisma schema for RepoDoctor AI
+// PostgreSQL + Prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       String @id @default(cuid())
+  name     String
+  email    String @unique
+  password String
+
+  githubId          String? @unique
+  githubUsername    String?
+  githubAccessToken String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  repositories Repository[]
+
+  @@map("users")
+}
+
+model Repository {
+  id String @id @default(cuid())
+
+  githubId      String  @unique
+  name          String
+  fullName      String
+  ownerLogin    String
+  defaultBranch String
+  private       Boolean @default(false)
+
+  htmlUrl  String
+  cloneUrl String
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  analyses Analysis[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Analysis {
+  id String @id @default(cuid())
+
+  repositoryId String
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  status AnalysisStatus @default(PENDING)
+
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([repositoryId])
+}
+
+enum AnalysisStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}

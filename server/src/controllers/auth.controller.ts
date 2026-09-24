@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { User } from "../models/User";
+import { prisma } from "../config/prisma";
 import {
   hashPassword,
   comparePassword,
@@ -22,7 +22,7 @@ export const register = async (
     }
 
     // Check existing user
-    const existingUser = await User.findOne({ email });
+    const existingUser = await prisma.user.findUnique({ where: { email } });
 
     if (existingUser) {
       return res.status(409).json({
@@ -41,20 +41,22 @@ export const register = async (
     });
 
     // Create user
-    const user = await User.create({
-      name,
-      email,
-      password: hashedPassword,
+    const user = await prisma.user.create({
+      data: {
+        name,
+        email,
+        password: hashedPassword,
+      },
     });
 
     // Generate JWT
-    const token = generateToken(user._id.toString());
+    const token = generateToken(user.id);
 
     return res.status(201).json({
       message: "Registration successful",
       token,
       user: {
-        id: user._id,
+        id: user.id,
         name: user.name,
         email: user.email,
       },
@@ -83,7 +85,7 @@ export const login = async (
       return;
     }
 
-   const user = await User.findOne({ email });
+    const user = await prisma.user.findUnique({ where: { email } });
 
     if (!user) {
       return res.status(401).json({
@@ -102,7 +104,7 @@ export const login = async (
       });
     }
 
-    const token = generateToken(user._id.toString());
+    const token = generateToken(user.id);
 
     res.status(200).json({
       success: true,
@@ -110,7 +112,7 @@ export const login = async (
       data: {
         token,
         user: {
-          id: user._id,
+          id: user.id,
           name: user.name,
           email: user.email,
         },
@@ -139,7 +141,15 @@ export const getCurrentUser = async (
       });
     }
 
-    const user = await User.findById(userId).select("-password");
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        githubUsername: true,
+      },
+    });
 
     if (!user) {
       return res.status(404).json({
@@ -149,7 +159,7 @@ export const getCurrentUser = async (
 
     return res.json({
       user: {
-        id: user._id,
+        id: user.id,
         name: user.name,
         email: user.email,
         githubUsername: user.githubUsername,

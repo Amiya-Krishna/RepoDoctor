@@ -5,7 +5,7 @@ import {
   getGitHubRepositories,
   getGitHubUser,
 } from "../services/github.service";
-import { User } from "../models/User";
+import { prisma } from "../config/prisma";
 
 export const connectGitHub = async (
   req: Request,
@@ -75,22 +75,24 @@ export const githubCallback = async (
     console.log("GitHub ID:", githubUser.id);
 
     // Update RepoDoctor user
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      {
-        githubId: String(githubUser.id),
-        githubUsername: githubUser.login,
-        githubAccessToken: accessToken,
-      },
-      {
-        new: true,
-      }
-    );
-
-    if (!updatedUser) {
-      return res.status(404).json({
-        message: "RepoDoctor user not found",
+    let updatedUser;
+    try {
+      updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          githubId: String(githubUser.id),
+          githubUsername: githubUser.login,
+          githubAccessToken: accessToken,
+        },
       });
+    } catch (updateError: any) {
+      if (updateError?.code === "P2025") {
+        return res.status(404).json({
+          message: "RepoDoctor user not found",
+        });
+      }
+
+      throw updateError;
     }
 
     console.log("GitHub connection saved successfully");
@@ -115,7 +117,7 @@ export const getRepositories = async (
   try {
     const userId = (req as any).user.userId;
 
-    const user = await User.findById(userId);
+    const user = await prisma.user.findUnique({ where: { id: userId } });
 
     if (!user) {
       return res.status(404).json({

@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import authRoutes from "./routes/auth.routes.js";
 import githubRoutes from "./routes/github.routes";
+import repositoryRoutes from "./routes/repository.routes";
 
 const app = express();
 
@@ -18,5 +19,6 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/github", githubRoutes);
+app.use("/api/repositories", repositoryRoutes);
 
 export default app;
