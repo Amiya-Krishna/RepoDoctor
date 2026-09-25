@@ -42,14 +42,32 @@ model Repository {
 }
 
 model Analysis {
-  id           String         @id @default(cuid())
-  repositoryId String
-  status       AnalysisStatus @default(PENDING)
-  startedAt    DateTime?
-  completedAt  DateTime?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  repository   Repository     @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  id             String   @id @default(cuid())
+
+  repositoryId   String
+  repository     Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  status         AnalysisStatus @default(PENDING)
+
+  projectType    String?
+  language      String?
+  packageManager String?
+  framework      String?
+  testFramework  String?
+  linter         String?
+
+  hasTypeScript  Boolean  @default(false)
+
+  sourceFileCount Int     @default(0)
+  testFileCount   Int     @default(0)
+
+  snapshot       Json?
+
+  startedAt      DateTime?
+  completedAt    DateTime?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([repositoryId])
 }

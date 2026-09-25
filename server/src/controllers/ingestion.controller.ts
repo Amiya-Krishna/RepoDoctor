@@ -42,16 +42,18 @@ export const ingest = async (
       });
     }
 
-    const result = await ingestRepository({
+    const snapshot = await ingestRepository({
+      repositoryId: repository.id,
       cloneUrl: repository.cloneUrl,
       accessToken: user.githubAccessToken,
       defaultBranch: repository.defaultBranch,
     });
 
     return res.json({
-      message: "Repository ingested successfully",
-      workspaceId: result.workspaceId,
+    message: "Repository analyzed successfully",
+    analysis: snapshot,
     });
+    
   } catch (error) {
     console.error(error);
 

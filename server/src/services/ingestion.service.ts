@@ -1,17 +1,26 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
 import path from "path";
-import { createWorkspace, removeWorkspace } from "./workspace.service";
+
+import {
+  createWorkspace,
+  removeWorkspace,
+} from "./workspace.service";
+
+import { analyzeRepository } from "../analyzers/repository.analyzer";
+import { saveAnalysis } from "./analysis.service";
 
 const execFileAsync = promisify(execFile);
 
 interface IngestionInput {
+  repositoryId: string;
   cloneUrl: string;
   accessToken: string;
   defaultBranch: string;
 }
 
 export const ingestRepository = async ({
+  repositoryId,
   cloneUrl,
   accessToken,
   defaultBranch,
@@ -26,7 +35,9 @@ export const ingestRepository = async ({
 
     const authenticatedUrl = cloneUrl.replace(
       "https://",
-      `https://x-access-token:${encodeURIComponent(accessToken)}@`
+      `https://x-access-token:${encodeURIComponent(
+        accessToken
+      )}@`
     );
 
     await execFileAsync(
@@ -45,12 +56,18 @@ export const ingestRepository = async ({
       }
     );
 
-    return {
-      workspaceId: workspace.id,
-      repositoryPath,
-    };
-  } catch (error) {
-    await removeWorkspace(workspace.path);
-    throw error;
+    const snapshot =
+      await analyzeRepository(repositoryPath);
+
+    await saveAnalysis(
+      repositoryId,
+      snapshot
+    );
+
+    return snapshot;
+  } finally {
+    await removeWorkspace(
+      workspace.path
+    );
   }
 };
