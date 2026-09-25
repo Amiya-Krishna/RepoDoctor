@@ -6,6 +6,7 @@ import {
   getGitHubUser,
 } from "../services/github.service";
 import { prisma } from "../config/prisma";
+import { saveRepository } from "../services/repository.service";
 
 export const connectGitHub = async (
   req: Request,
@@ -97,10 +98,8 @@ export const githubCallback = async (
 
     console.log("GitHub connection saved successfully");
 
-    return res.json({
-      message: "GitHub connected successfully",
-      githubUsername: githubUser.login,
-    });
+    return res.redirect("http://localhost:5173");
+
   } catch (error) {
     console.error("GitHub callback error:", error);
 
@@ -117,7 +116,11 @@ export const getRepositories = async (
   try {
     const userId = (req as any).user.userId;
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const user = await prisma.user.findUnique({
+      where: {
+        id: userId,
+      },
+    });
 
     if (!user) {
       return res.status(404).json({
@@ -131,18 +134,56 @@ export const getRepositories = async (
       });
     }
 
-    const repositories = await getGitHubRepositories(
-      user.githubAccessToken
+    const githubRepositories =
+      await getGitHubRepositories(
+        user.githubAccessToken
+      );
+
+    console.log(
+      "GitHub repositories:",
+      githubRepositories.length
     );
+
+    for (const repo of githubRepositories) {
+      console.log(
+        "Saving repository:",
+        repo.full_name
+      );
+
+      await saveRepository({
+        githubId: String(repo.id),
+        name: repo.name,
+        fullName: repo.full_name,
+        ownerLogin: repo.owner.login,
+        defaultBranch: repo.default_branch,
+        private: repo.private,
+        htmlUrl: repo.html_url,
+        cloneUrl: repo.clone_url,
+        userId,
+      });
+    }
+
+    const repositories =
+      await prisma.repository.findMany({
+        where: {
+          userId,
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+      });
 
     return res.json({
       repositories,
     });
   } catch (error) {
-    console.error("Get repositories error:", error);
+    console.error(
+      "Get repositories error:",
+      error
+    );
 
     return res.status(500).json({
-      message: "Failed to fetch GitHub repositories",
+      message: "Failed to fetch repositories",
     });
   }
 };

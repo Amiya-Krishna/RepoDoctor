@@ -1,12 +1,18 @@
 import { useState, type FormEvent } from "react";
 import { api } from "./lib/api";
+import Repositories from "./pages/Repositories";
 
 function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [loggedIn, setLoggedIn] = useState(
+    !!localStorage.getItem("token")
+  );
 
-  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
     event.preventDefault();
 
     try {
@@ -20,6 +26,7 @@ function App() {
         response.data.data.token
       );
 
+      setLoggedIn(true);
       setMessage("Login successful");
     } catch (error: any) {
       setMessage(
@@ -50,18 +57,32 @@ function App() {
     }
   };
 
+  if (loggedIn) {
+    return (
+      <main>
+        <h1>RepoDoctor AI</h1>
+
+        <button onClick={connectGitHub}>
+          Connect GitHub
+        </button>
+
+        {message && <p>{message}</p>}
+
+        <Repositories />
+      </main>
+    );
+  }
+
   return (
     <main>
       <h1>RepoDoctor AI</h1>
 
-      {/* Login */}
       <form onSubmit={handleLogin}>
         <input
           type="email"
           placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          required
         />
 
         <input
@@ -69,18 +90,12 @@ function App() {
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          required
         />
 
         <button type="submit">
           Login
         </button>
       </form>
-
-      {/* GitHub */}
-      <button onClick={connectGitHub}>
-        Connect GitHub
-      </button>
 
       {message && <p>{message}</p>}
     </main>
