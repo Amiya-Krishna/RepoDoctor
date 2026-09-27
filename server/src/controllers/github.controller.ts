@@ -1,17 +1,14 @@
 import { Request, Response } from "express";
+import { prisma } from "../config/prisma.js";
 import {
   exchangeCodeForToken,
   getGitHubAuthUrl,
   getGitHubRepositories,
   getGitHubUser,
-} from "../services/github.service";
-import { prisma } from "../config/prisma";
-import { saveRepository } from "../services/repository.service";
+} from "../services/github.service.js";
+import { saveRepository } from "../services/repository.service.js";
 
-export const connectGitHub = async (
-  req: Request,
-  res: Response
-) => {
+export const connectGitHub = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId;
 
@@ -37,10 +34,7 @@ export const connectGitHub = async (
   }
 };
 
-export const githubCallback = async (
-  req: Request,
-  res: Response
-) => {
+export const githubCallback = async (req: Request, res: Response) => {
   try {
     const { code, state } = req.query;
 
@@ -99,7 +93,6 @@ export const githubCallback = async (
     console.log("GitHub connection saved successfully");
 
     return res.redirect("http://localhost:5173");
-
   } catch (error) {
     console.error("GitHub callback error:", error);
 
@@ -109,10 +102,7 @@ export const githubCallback = async (
   }
 };
 
-export const getRepositories = async (
-  req: Request,
-  res: Response
-) => {
+export const getRepositories = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId;
 
@@ -134,21 +124,14 @@ export const getRepositories = async (
       });
     }
 
-    const githubRepositories =
-      await getGitHubRepositories(
-        user.githubAccessToken
-      );
-
-    console.log(
-      "GitHub repositories:",
-      githubRepositories.length
+    const githubRepositories = await getGitHubRepositories(
+      user.githubAccessToken,
     );
 
+    console.log("GitHub repositories:", githubRepositories.length);
+
     for (const repo of githubRepositories) {
-      console.log(
-        "Saving repository:",
-        repo.full_name
-      );
+      console.log("Saving repository:", repo.full_name);
 
       await saveRepository({
         githubId: String(repo.id),
@@ -163,24 +146,20 @@ export const getRepositories = async (
       });
     }
 
-    const repositories =
-      await prisma.repository.findMany({
-        where: {
-          userId,
-        },
-        orderBy: {
-          updatedAt: "desc",
-        },
-      });
+    const repositories = await prisma.repository.findMany({
+      where: {
+        userId,
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    });
 
     return res.json({
       repositories,
     });
   } catch (error) {
-    console.error(
-      "Get repositories error:",
-      error
-    );
+    console.error("Get repositories error:", error);
 
     return res.status(500).json({
       message: "Failed to fetch repositories",

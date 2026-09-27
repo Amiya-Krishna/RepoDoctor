@@ -1,5 +1,5 @@
-import { AIProvider } from "../ai/ai.provider";
-import { OpenRouterProvider } from "../ai/openrouter.provider";
+import { AIProvider } from "../ai/ai.provider.js";
+import { OpenRouterProvider } from "../ai/openrouter.provider.js";
 
 const provider: AIProvider = new OpenRouterProvider();
 

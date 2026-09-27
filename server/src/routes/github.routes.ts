@@ -3,8 +3,8 @@ import {
   connectGitHub,
   githubCallback,
   getRepositories,
-} from "../controllers/github.controller";
-import { protect } from "../middleware/auth.middleware";
+} from "../controllers/github.controller.js";
+import { protect } from "../middleware/auth.middleware.js";
 
 const router = Router();
 

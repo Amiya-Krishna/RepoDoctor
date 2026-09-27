@@ -5,10 +5,10 @@ import path from "path";
 import {
   createWorkspace,
   removeWorkspace,
-} from "./workspace.service";
+} from "./workspace.service.js";
 
-import { analyzeRepository } from "../analyzers/repository.analyzer";
-import { saveAnalysis } from "./analysis.service";
+import { analyzeRepository } from "../analyzers/repository.analyzer.js";
+import { saveAnalysis } from "./analysis.service.js";
 
 const execFileAsync = promisify(execFile);
 

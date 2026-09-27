@@ -1,10 +1,6 @@
-import { prisma } from "../config/prisma";
-import { analyzeRepository } from "../analyzers/repository.analyzer";
+import { prisma } from "../config/prisma.js";
 
-export const saveAnalysis = async (
-  repositoryId: string,
-  snapshot: any
-) => {
+export const saveAnalysis = async (repositoryId: string, snapshot: any) => {
   return prisma.analysis.create({
     data: {
       repositoryId,
@@ -20,11 +16,9 @@ export const saveAnalysis = async (
 
       hasTypeScript: snapshot.hasTypeScript,
 
-      sourceFileCount:
-        snapshot.sourceFileCount,
+      sourceFileCount: snapshot.sourceFileCount,
 
-      testFileCount:
-        snapshot.testFileCount,
+      testFileCount: snapshot.testFileCount,
 
       snapshot,
       completedAt: new Date(),

@@ -1,13 +1,10 @@
 import { Request, Response } from "express";
-import { prisma } from "../config/prisma";
+import { prisma } from "../config/prisma.js";
 
-export const getLatestAnalysis = async (
-  req: Request,
-  res: Response
-) => {
+export const getLatestAnalysis = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId;
-    const repositoryId = req.params.repositoryId;
+    const repositoryId = req.params.repositoryId as string;
 
     const repository = await prisma.repository.findFirst({
       where: {
@@ -49,23 +46,17 @@ export const getLatestAnalysis = async (
   }
 };
 
-
-export const getRepositoryAnalyses = async (
-  req: Request,
-  res: Response
-) => {
+export const getRepositoryAnalyses = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId;
+    const repositoryId = req.params.repositoryId as string;
 
-    const repositoryId = req.params.repositoryId;
-
-    const repository =
-      await prisma.repository.findFirst({
-        where: {
-          id: repositoryId,
-          userId,
-        },
-      });
+    const repository = await prisma.repository.findFirst({
+      where: {
+        id: repositoryId,
+        userId,
+      },
+    });
 
     if (!repository) {
       return res.status(404).json({
@@ -74,28 +65,28 @@ export const getRepositoryAnalyses = async (
     }
 
     const analyses = await prisma.analysis.findMany({
-    where: {
-      repositoryId,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-    select: {
-      id: true,
-      status: true,
-      projectType: true,
-      language: true,
-      packageManager: true,
-      framework: true,
-      testFramework: true,
-      linter: true,
-      hasTypeScript: true,
-      sourceFileCount: true,
-      testFileCount: true,
-      createdAt: true,
-      completedAt: true,
-    },
-  });
+      where: {
+        repositoryId,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      select: {
+        id: true,
+        status: true,
+        projectType: true,
+        language: true,
+        packageManager: true,
+        framework: true,
+        testFramework: true,
+        linter: true,
+        hasTypeScript: true,
+        sourceFileCount: true,
+        testFileCount: true,
+        createdAt: true,
+        completedAt: true,
+      },
+    });
 
     return res.json({
       analyses,

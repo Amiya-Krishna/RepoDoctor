@@ -1,9 +1,9 @@
 import { Router } from "express";
-import { protect } from "../middleware/auth.middleware";
-import { ingest } from "../controllers/ingestion.controller";
-import { getRepositoryAnalyses } from "../controllers/analysis.controller";
-import { listRepositories, getRepository } from "../controllers/repository.controller";
-import { getLatestAnalysis } from "../controllers/analysis.controller";
+import { protect } from "../middleware/auth.middleware.js";
+import { ingest } from "../controllers/ingestion.controller.js";
+import { getRepositoryAnalyses } from "../controllers/analysis.controller.js";
+import { listRepositories, getRepository } from "../controllers/repository.controller.js";
+import { getLatestAnalysis } from "../controllers/analysis.controller.js";
 
 const router = Router();
 

@@ -1,6 +1,6 @@
 import OpenAI from "openai";
-import { AIProvider } from "./ai.provider";
-import { aiConfig } from "./ai.config";
+import { AIProvider } from "./ai.provider.js";
+import { aiConfig } from "./ai.config.js";
 
 export class OpenRouterProvider implements AIProvider {
   private client: OpenAI;

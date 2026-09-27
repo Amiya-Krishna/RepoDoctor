@@ -1,11 +1,8 @@
 import { Request, Response } from "express";
-import { prisma } from "../config/prisma";
-import { ingestRepository } from "../services/ingestion.service";
+import { prisma } from "../config/prisma.js";
+import { ingestRepository } from "../services/ingestion.service.js";
 
-export const ingest = async (
-  req: Request,
-  res: Response
-) => {
+export const ingest = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId;
 
@@ -50,10 +47,9 @@ export const ingest = async (
     });
 
     return res.json({
-    message: "Repository analyzed successfully",
-    analysis: snapshot,
+      message: "Repository analyzed successfully",
+      analysis: snapshot,
     });
-    
   } catch (error) {
     console.error(error);
 

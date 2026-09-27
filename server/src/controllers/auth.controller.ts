@@ -1,16 +1,13 @@
 import { Request, Response } from "express";
-import { prisma } from "../config/prisma";
+import { prisma } from "../config/prisma.js";
+import { AuthRequest } from "../middleware/auth.middleware.js";
 import {
-  hashPassword,
   comparePassword,
   generateToken,
-} from "../services/auth.service";
-import { AuthRequest } from "../middleware/auth.middleware.js";
+  hashPassword,
+} from "../services/auth.service.js";
 
-export const register = async (
-  req: Request,
-  res: Response
-) => {
+export const register = async (req: Request, res: Response) => {
   try {
     const { name, email, password } = req.body;
 
@@ -70,10 +67,7 @@ export const register = async (
   }
 };
 
-export const login = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
+export const login = async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password } = req.body;
 
@@ -88,20 +82,19 @@ export const login = async (
     const user = await prisma.user.findUnique({ where: { email } });
 
     if (!user) {
-      return res.status(401).json({
+      res.status(401).json({
         message: "Invalid email or password",
       });
+      return;
     }
 
-    const isPasswordValid = await comparePassword(
-      password,
-      user.password
-    );
+    const isPasswordValid = await comparePassword(password, user.password);
 
     if (!isPasswordValid) {
-      return res.status(401).json({
+      res.status(401).json({
         message: "Invalid email or password",
       });
+      return;
     }
 
     const token = generateToken(user.id);
@@ -128,10 +121,7 @@ export const login = async (
   }
 };
 
-export const getCurrentUser = async (
-  req: AuthRequest,
-  res: Response
-) => {
+export const getCurrentUser = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.userId;
 

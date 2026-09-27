@@ -1,4 +1,4 @@
-import { prisma } from "../config/prisma";
+import { prisma } from "../config/prisma.js";
 
 interface SaveRepositoryInput {
   githubId: string;
@@ -12,9 +12,7 @@ interface SaveRepositoryInput {
   userId: string;
 }
 
-export const saveRepository = async (
-  data: SaveRepositoryInput
-) => {
+export const saveRepository = async (data: SaveRepositoryInput) => {
   return prisma.repository.upsert({
     where: {
       githubId: data.githubId,
@@ -32,9 +30,7 @@ export const saveRepository = async (
   });
 };
 
-export const getUserRepositories = async (
-  userId: string
-) => {
+export const getUserRepositories = async (userId: string) => {
   return prisma.repository.findMany({
     where: {
       userId,

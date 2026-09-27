@@ -1,8 +1,8 @@
 import express from "express";
 import cors from "cors";
 import authRoutes from "./routes/auth.routes.js";
-import githubRoutes from "./routes/github.routes";
-import repositoryRoutes from "./routes/repository.routes";
+import githubRoutes from "./routes/github.routes.js";
+import repositoryRoutes from "./routes/repository.routes.js";
 
 const app = express();
 

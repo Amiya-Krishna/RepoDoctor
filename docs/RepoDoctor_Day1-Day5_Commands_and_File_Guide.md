@@ -27,13 +27,13 @@ The planned system can:
 
 ## Current progress
 
-| Day | Main work | Status |
-|---|---|---|
-| Day 1 | Project/backend foundation | Completed |
-| Day 2 | Authentication foundation | Completed |
-| Day 3 | GitHub OAuth/connection foundation | Completed |
+| Day   | Main work                            | Status    |
+| ----- | ------------------------------------ | --------- |
+| Day 1 | Project/backend foundation           | Completed |
+| Day 2 | Authentication foundation            | Completed |
+| Day 3 | GitHub OAuth/connection foundation   | Completed |
 | Day 4 | PostgreSQL + Prisma repository layer | Completed |
-| Day 5 | Docker + safe repository ingestion | Completed |
+| Day 5 | Docker + safe repository ingestion   | Completed |
 
 ---
 
@@ -306,7 +306,7 @@ It:
 The repository routes use:
 
 ```ts
-protect
+protect;
 ```
 
 before protected handlers.
@@ -613,7 +613,7 @@ prisma/schema.prisma
 The application then uses the generated client:
 
 ```ts
-import { prisma } from "../config/prisma";
+import { prisma } from "../config/prisma.js.js.js.js.js.js.js";
 ```
 
 ---
@@ -733,8 +733,8 @@ It uses:
 prisma.repository.findMany({
   where: {
     userId,
-  }
-})
+  },
+});
 ```
 
 This ensures repositories are scoped to the authenticated user.
@@ -789,7 +789,7 @@ const userId = (req as any).user.userId;
 Then calls the repository service:
 
 ```ts
-getUserRepositories(userId)
+getUserRepositories(userId);
 ```
 
 The controller handles HTTP-level concerns.
@@ -1374,7 +1374,7 @@ server/src/services/ingestion.service.ts
 The ingestion service uses:
 
 ```ts
-execFile
+execFile;
 ```
 
 from Node.js.
@@ -1495,10 +1495,7 @@ A random UUID is useful for naming temporary workspaces because different reposi
 The ingestion service uses:
 
 ```ts
-path.join(
-  workspace.path,
-  "repository"
-)
+path.join(workspace.path, "repository");
 ```
 
 This creates a filesystem path in a platform-safe manner.
@@ -1539,7 +1536,7 @@ This is important for safe resource handling.
 The ingestion service calls:
 
 ```ts
-removeWorkspace(workspace.path)
+removeWorkspace(workspace.path);
 ```
 
 when an ingestion operation fails.
@@ -1746,7 +1743,7 @@ The service function declared:
 but later used:
 
 ```ts
-defaultBranch
+defaultBranch;
 ```
 
 Fix:
@@ -2015,29 +2012,29 @@ find /tmp/repodoctor -maxdepth 4 -type f | head -30
 
 # 69. Command Full-Form Summary
 
-| Command/tool | Full form / meaning | Main use |
-|---|---|---|
-| `npm` | Node Package Manager | Node dependency/package management |
-| `npx` | Node package executor | Run package commands |
-| `tsx` | TypeScript execution tool | Execute TS during development |
-| `dev` | Development script | Start development server |
-| `JWT` | JSON Web Token | Authentication |
-| `OAuth` | Open Authorization | Authorized third-party access |
-| `ORM` | Object-Relational Mapping | Application/database mapping |
-| `SQL` | Structured Query Language | Relational database querying |
-| `PostgreSQL` | PostgreSQL database system | Store relational data |
-| `Prisma` | Prisma ORM/toolkit | Type-safe database access |
-| `Docker` | Containerization platform | Isolated application environment |
-| `Docker Compose` | Multi-container configuration/tool | Run related services |
-| `Git` | Distributed version-control system | Repository/version management |
-| `UUID` | Universally Unique Identifier | Unique workspace IDs |
-| `API` | Application Programming Interface | Communication between software |
-| `HTTP` | Hypertext Transfer Protocol | Web/API communication |
-| `REST` | Representational State Transfer | Common API architecture |
-| `CRUD` | Create, Read, Update, Delete | Basic data operations |
-| `CUID` | Collision-resistant Unique Identifier | Prisma-generated IDs |
-| `CI` | Continuous Integration | Automated/reproducible build context |
-| `OAuth token` | Authorization credential | Authorized GitHub operations |
+| Command/tool     | Full form / meaning                   | Main use                             |
+| ---------------- | ------------------------------------- | ------------------------------------ |
+| `npm`            | Node Package Manager                  | Node dependency/package management   |
+| `npx`            | Node package executor                 | Run package commands                 |
+| `tsx`            | TypeScript execution tool             | Execute TS during development        |
+| `dev`            | Development script                    | Start development server             |
+| `JWT`            | JSON Web Token                        | Authentication                       |
+| `OAuth`          | Open Authorization                    | Authorized third-party access        |
+| `ORM`            | Object-Relational Mapping             | Application/database mapping         |
+| `SQL`            | Structured Query Language             | Relational database querying         |
+| `PostgreSQL`     | PostgreSQL database system            | Store relational data                |
+| `Prisma`         | Prisma ORM/toolkit                    | Type-safe database access            |
+| `Docker`         | Containerization platform             | Isolated application environment     |
+| `Docker Compose` | Multi-container configuration/tool    | Run related services                 |
+| `Git`            | Distributed version-control system    | Repository/version management        |
+| `UUID`           | Universally Unique Identifier         | Unique workspace IDs                 |
+| `API`            | Application Programming Interface     | Communication between software       |
+| `HTTP`           | Hypertext Transfer Protocol           | Web/API communication                |
+| `REST`           | Representational State Transfer       | Common API architecture              |
+| `CRUD`           | Create, Read, Update, Delete          | Basic data operations                |
+| `CUID`           | Collision-resistant Unique Identifier | Prisma-generated IDs                 |
+| `CI`             | Continuous Integration                | Automated/reproducible build context |
+| `OAuth token`    | Authorization credential              | Authorized GitHub operations         |
 
 ---
 
@@ -2125,4 +2122,3 @@ Repository statistics
 ```
 
 That information will become the foundation for the later AI agents.
-

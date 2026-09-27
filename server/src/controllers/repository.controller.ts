@@ -1,11 +1,8 @@
 import { Request, Response } from "express";
-import { getUserRepositories } from "../services/repository.service";
-import { prisma } from "../config/prisma";
+import { prisma } from "../config/prisma.js";
+import { getUserRepositories } from "../services/repository.service.js";
 
-export const listRepositories = async (
-  req: Request,
-  res: Response
-) => {
+export const listRepositories = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId;
 
@@ -23,13 +20,10 @@ export const listRepositories = async (
   }
 };
 
-export const getRepository = async (
-  req: Request,
-  res: Response
-) => {
+export const getRepository = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId;
-    const repositoryId = req.params.repositoryId;
+    const repositoryId = req.params.repositoryId as string;
 
     const repository = await prisma.repository.findFirst({
       where: {
