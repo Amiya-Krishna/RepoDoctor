@@ -12,7 +12,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "test:ai": "tsx src/test-ai.ts",
-    "test:context": "tsx src/test-context.ts"
+    "test:context": "tsx src/test-context.ts",
+    "test:bug-agent": "tsx src/test-bug-agent.ts"
   },
   "keywords": [],
   "author": "",

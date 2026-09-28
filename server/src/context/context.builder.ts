@@ -4,7 +4,7 @@ import {
   isSourceFile,
   shouldIgnoreDirectory,
 } from "./context.filters.js";
-import { ContextFile, RepositoryContext } from "./context.types.js";
+import type { ContextFile, RepositoryContext } from "./context.types.js";
 
 const MAX_FILE_SIZE = 50 * 1024;
 const MAX_FILES = 30;

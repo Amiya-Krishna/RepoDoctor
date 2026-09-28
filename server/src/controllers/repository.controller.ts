@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import type{ Request, Response } from "express";
 import { prisma } from "../config/prisma.js";
 import { getUserRepositories } from "../services/repository.service.js";
 

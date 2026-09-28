@@ -42,32 +42,34 @@ model Repository {
 }
 
 model Analysis {
-  id             String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  repositoryId   String
-  repository     Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  repositoryId String
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
 
-  status         AnalysisStatus @default(PENDING)
+  status AnalysisStatus @default(PENDING)
 
   projectType    String?
-  language      String?
+  language       String?
   packageManager String?
   framework      String?
   testFramework  String?
   linter         String?
 
-  hasTypeScript  Boolean  @default(false)
+  hasTypeScript Boolean @default(false)
 
-  sourceFileCount Int     @default(0)
-  testFileCount   Int     @default(0)
+  sourceFileCount Int @default(0)
+  testFileCount   Int @default(0)
 
-  snapshot       Json?
+  snapshot Json?
 
-  startedAt      DateTime?
-  completedAt    DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  bugFindings BugFinding[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([repositoryId])
 }
@@ -77,4 +79,31 @@ enum AnalysisStatus {
   RUNNING
   COMPLETED
   FAILED
+}
+
+model BugFinding {
+  id String @id @default(cuid())
+
+  analysisId String
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String
+
+  category String
+  severity String
+
+  filePath  String
+  lineStart Int
+  lineEnd   Int
+
+  evidence     String
+  suggestedFix String
+
+  confidence Float
+
+  createdAt DateTime @default(now())
+
+  @@index([analysisId])
+  @@index([severity])
 }

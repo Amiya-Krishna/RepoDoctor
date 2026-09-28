@@ -1,6 +1,6 @@
-import { Request, Response } from "express";
+import type{ Request, Response } from "express";
 import { prisma } from "../config/prisma.js";
-import { AuthRequest } from "../middleware/auth.middleware.js";
+import type{ AuthRequest } from "../middleware/auth.middleware.js";
 import {
   comparePassword,
   generateToken,

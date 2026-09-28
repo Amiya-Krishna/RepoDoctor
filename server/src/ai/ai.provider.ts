@@ -3,4 +3,10 @@ export interface AIProvider {
     systemPrompt: string,
     userPrompt: string
   ): Promise<string>;
+
+  generateStructured<T>(
+    systemPrompt: string,
+    userPrompt: string,
+    schema: Record<string, unknown>
+  ): Promise<T>;
 }

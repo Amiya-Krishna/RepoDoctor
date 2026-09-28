@@ -1,4 +1,4 @@
-import { RepositoryContext } from "./context.types.js";
+import type { RepositoryContext } from "./context.types.js";
 
 export const formatRepositoryContext = (
   context: RepositoryContext
