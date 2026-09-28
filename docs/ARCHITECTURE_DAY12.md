@@ -200,7 +200,12 @@ User
   └── Repository
           │
           └── Analysis
+                 ├── Bug Findings
+                 ├── Security Findings
+                 └── Generated Tests
 ```
+
+The exact Prisma relation/model names must remain the source of truth for implementation.
 
 Future entities can include:
 
@@ -246,7 +251,29 @@ PostgreSQL
 
 BullMQ + Redis is planned for the later production pipeline.
 
-## 9. Scope Control
+## 9. Current AI Safety Boundary
+
+AI agents receive repository-derived context rather than blindly receiving the entire repository.
+
+```text
+Repository
+    ↓
+Static/metadata analysis
+    ↓
+Repository Snapshot
+    ↓
+Relevant Context
+    ↓
+AI Agent
+    ↓
+Structured Result
+```
+
+AI output is treated as untrusted data until validated against the relevant schema.
+
+The Test Generation Agent does not execute generated tests as part of Day 12. Execution belongs to the later isolated Docker verification stage.
+
+## 10. Scope Control
 
 Initial supported repositories:
 

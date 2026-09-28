@@ -3,13 +3,17 @@ import OpenAI from "openai";
 import type { AIProvider } from "./ai.provider.js";
 import { aiConfig } from "./ai.config.js";
 
-export class OpenRouterProvider implements AIProvider {
+export class GroqProvider implements AIProvider {
   private readonly client: OpenAI;
 
   constructor() {
+    if (!aiConfig.groqApiKey) {
+      throw new Error("GROQ_API_KEY is not configured");
+    }
+
     this.client = new OpenAI({
-      apiKey: aiConfig.openrouterKey,
-      baseURL: "https://openrouter.ai/api/v1",
+      apiKey: aiConfig.groqApiKey,
+      baseURL: "https://api.groq.com/openai/v1",
     });
   }
 
@@ -19,7 +23,7 @@ export class OpenRouterProvider implements AIProvider {
   ): Promise<string> {
     const response =
       await this.client.chat.completions.create({
-        model: aiConfig.openrouterModel,
+        model: aiConfig.groqModel,
         messages: [
           {
             role: "system",
@@ -42,7 +46,7 @@ export class OpenRouterProvider implements AIProvider {
   ): Promise<T> {
     const response =
       await this.client.chat.completions.create({
-        model: aiConfig.openrouterModel,
+        model: aiConfig.groqModel,
         messages: [
           {
             role: "system",
@@ -56,7 +60,7 @@ export class OpenRouterProvider implements AIProvider {
         response_format: {
           type: "json_schema",
           json_schema: {
-            name: "repodoctor_bug_detection",
+            name: "repodoctor_structured_output",
             strict: true,
             schema,
           },
@@ -68,7 +72,7 @@ export class OpenRouterProvider implements AIProvider {
 
     if (!content) {
       throw new Error(
-        "AI returned an empty structured response"
+        "Groq returned an empty structured response"
       );
     }
 

@@ -1,13 +1,15 @@
-import { generateAIResponse } from "./services/ai.service.js";
+import { createAIProvider } from "./ai/ai.provider.factory.js";
 
 const testAI = async () => {
-  const response = await generateAIResponse(
-    "You are a software engineering assistant.",
-    "Explain what a JavaScript Promise is in one sentence."
+  const provider = createAIProvider();
+
+  const result = await provider.generate(
+    "You are a helpful assistant.",
+    "Reply with exactly: RepoDoctor AI is working."
   );
 
-  console.log("\nAI RESPONSE:\n");
-  console.log(response);
+  console.log("\nAI RESPONSE\n");
+  console.log(result);
 };
 
 testAI().catch((error) => {

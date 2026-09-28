@@ -11,15 +11,20 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
-    "test:ai": "tsx src/test-ai.ts",
     "test:context": "tsx src/test-context.ts",
-    "test:bug-agent": "tsx src/test-bug-agent.ts"
+    "test:ai": "tsx src/test-ai.ts",
+    "test:openrouter": "tsx src/test-openrouter.ts",
+    "test:groq": "tsx src/test-groq.ts",
+    "test:gemini": "tsx src/test-gemini.ts",
+    "test:bug-agent": "tsx src/test-bug-agent.ts",
+    "test:security-agent": "tsx src/test-security-agent.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@google/genai": "^2.24.0",
     "@prisma/client": "^6.19.3",
     "axios": "^1.20.0",
     "bcryptjs": "^3.0.3",
@@ -34,7 +39,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.3",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   }

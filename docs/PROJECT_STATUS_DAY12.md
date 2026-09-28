@@ -1,6 +1,6 @@
 # RepoDoctor AI — Project Status
 
-**Current milestone:** Day 6 completed/planned implementation baseline  
+**Current milestone:** Day 12 — Test Generation Agent completed/planned implementation baseline  
 **Project:** RepoDoctor AI  
 **Scope:** Autonomous repository analysis and repair for JavaScript/TypeScript GitHub repositories
 
@@ -110,6 +110,82 @@ Implemented/planned:
 
 The analyzer is intentionally metadata/static-analysis focused. Arbitrary `npm install`, `npm test`, or repository scripts are **not** executed yet.
 
+## Day 7 — Repository Dashboard + Analysis Results
+- Analysis results/dashboard layer added to the project flow.
+- Repository and analysis information is presented without changing the read-only repository model.
+
+**Status:** Completed/planned.
+
+## Day 8 — AI Provider Abstraction
+- API-key based AI provider abstraction.
+- `AIProviderManager`.
+- Provider order:
+  - OpenRouter — Primary
+  - Groq — Secondary
+  - Gemini — Tertiary
+- Automatic provider switching on provider failure.
+- Current OpenRouter model: `qwen/qwen3.8-27b:free`.
+- Verified fallback behavior: OpenRouter HTTP 429 → Groq success.
+- `createAIProvider()` creates the manager.
+- Agents use the manager instead of direct provider coupling.
+
+**Status:** Completed.
+
+## Day 9 — Context Builder
+- Repository context is prepared from the repository snapshot.
+- Relevant information is selected for AI analysis instead of blindly sending the entire repository.
+
+**Status:** Completed.
+
+## Day 10 — Bug Detection Agent
+- Bug Detection Agent added.
+- Structured AI output using prompt/schema/type separation.
+- Findings can be persisted through the analysis service layer.
+- Agent uses `AIProviderManager`.
+
+**Status:** Completed/planned implementation baseline.
+
+## Day 11 — Security Agent
+- Security analysis agent added/planned.
+- Structured security detection result.
+- Security findings persistence.
+- Reuses `AIProviderManager`.
+- Security analysis remains read-only.
+
+**Status:** Completed/planned implementation baseline.
+
+## Day 12 — Test Generation Agent
+- Test Generation Agent added.
+- Test-generation prompt.
+- Structured schema and TypeScript types.
+- Test-generation service.
+- Generated-test persistence service.
+- Prisma support for generated tests.
+- Test-generation test script.
+
+Generated tests are currently stored as reviewable artifacts. They are not automatically written into or executed against the user's source repository.
+
+**Status:** Completed/planned implementation baseline.
+
+## Current AI Pipeline
+
+```text
+Repository Snapshot
+      ↓
+Context Builder
+      ↓
+AIProviderManager
+      ↓
+ ┌──────────────┬────────────────┬────────────────────┐
+ ▼              ▼                ▼
+Bug Agent   Security Agent   Test Generation Agent
+ ▼              ▼                ▼
+Findings     Findings        Generated Tests
+ └──────────────┬────────────────┘
+                ▼
+           PostgreSQL
+```
+
 ## Current End-to-End Flow
 
 ```text
@@ -133,16 +209,34 @@ Repository Analyzer
   ↓
 Repository Snapshot
   ↓
+Context Builder
+  ↓
+AIProviderManager
+  ↓
+Bug / Security / Test Generation Agents
+  ↓
+Structured Results
+  ↓
 PostgreSQL
   ↓
-Dashboard
+Dashboard / Analysis Results
 ```
+
+## Day 12 Safety Boundary
+
+The current system still does **not** automatically:
+- modify the user's source repository
+- push to `main`, `master`, or another source branch
+- force-push
+- merge changes
+- execute generated tests against an untrusted repository
+- execute arbitrary `npm install`, `npm test`, or `npm run build` on the host
+- create a GitHub PR before the later verification architecture is implemented
 
 ## Next Milestone
 
-**Day 7:** Repository dashboard + analysis results UI.
+**Day 13:** Risk Engine.
 
-After Day 7:
-- Day 8: AI provider abstraction
-- Day 9: Context builder
-- Day 10: Bug Detection Agent
+After Day 13:
+- Day 14: Unified Analysis Pipeline
+- Day 15+: Isolated repair, Dockerized verification, retry/replanning, and GitHub PR generation

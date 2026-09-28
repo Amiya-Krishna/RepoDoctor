@@ -1,15 +1,14 @@
-import { OpenRouterProvider } from "../ai/openrouter.provider.js";
+import { createAIProvider } from "../ai/ai.provider.factory.js";
 import type { AIProvider } from "../ai/ai.provider.js";
 
-const provider: AIProvider = new OpenRouterProvider();
+const provider = createAIProvider();
 
 export const generateAIResponse = async <T>(
   systemPrompt: string,
   userPrompt: string,
-  schema?: Record<string, unknown>,
-  schemaName?: string
+  schema?: Record<string, unknown>
 ): Promise<T> => {
-  if (schema && schemaName) {
+  if (schema) {
     return provider.generateStructured<T>(
       systemPrompt,
       userPrompt,

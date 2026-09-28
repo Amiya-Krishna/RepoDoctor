@@ -66,7 +66,8 @@ model Analysis {
   startedAt   DateTime?
   completedAt DateTime?
 
-  bugFindings BugFinding[]
+  bugFindings      BugFinding[]
+  securityFindings SecurityFinding[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -106,4 +107,32 @@ model BugFinding {
 
   @@index([analysisId])
   @@index([severity])
+}
+
+model SecurityFinding {
+  id String @id @default(cuid())
+
+  analysisId String
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String
+
+  category String
+  severity String
+
+  filePath  String
+  lineStart Int
+  lineEnd   Int
+
+  evidence     String
+  suggestedFix String
+
+  confidence Float
+
+  createdAt DateTime @default(now())
+
+  @@index([analysisId])
+  @@index([severity])
+  @@index([category])
 }
