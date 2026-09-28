@@ -1,0 +1,43 @@
+export const SEVERITY_SCORES: Record<
+  string,
+  number
+> = {
+  LOW: 20,
+  MEDIUM: 45,
+  HIGH: 70,
+  CRITICAL: 95,
+};
+
+export const SECURITY_CATEGORY_BONUS: Record<
+  string,
+  number
+> = {
+  SECRET_EXPOSURE: 10,
+  INJECTION: 15,
+  AUTHENTICATION: 12,
+  AUTHORIZATION: 12,
+  CRYPTOGRAPHY: 10,
+  INPUT_VALIDATION: 8,
+  PATH_TRAVERSAL: 12,
+  SSRF: 15,
+  COMMAND_EXECUTION: 15,
+  DATA_EXPOSURE: 10,
+  INSECURE_CONFIGURATION: 7,
+  DEPENDENCY: 6,
+};
+
+export const BUG_CATEGORY_BONUS: Record<
+  string,
+  number
+> = {
+  LOGIC: 5,
+  RUNTIME: 8,
+  TYPE: 3,
+  ASYNC: 7,
+  SECURITY: 12,
+  PERFORMANCE: 4,
+};
+
+export const CONFIDENCE_WEIGHT = 0.7;
+
+export const MAX_RISK_SCORE = 100;

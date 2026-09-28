@@ -69,6 +69,7 @@ model Analysis {
   bugFindings      BugFinding[]
   securityFindings SecurityFinding[]
   generatedTests   GeneratedTest[]
+  riskAssessments  RiskAssessment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -162,4 +163,27 @@ model GeneratedTest {
 
   @@index([analysisId])
   @@index([type])
+}
+
+model RiskAssessment {
+  id String @id @default(cuid())
+
+  analysisId String
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  findingId String
+  source    String
+
+  score    Int
+  level    String
+  priority String
+
+  factors Json
+
+  createdAt DateTime @default(now())
+
+  @@index([analysisId])
+  @@index([findingId])
+  @@index([level])
+  @@index([priority])
 }
