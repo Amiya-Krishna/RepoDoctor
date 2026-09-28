@@ -68,6 +68,7 @@ model Analysis {
 
   bugFindings      BugFinding[]
   securityFindings SecurityFinding[]
+  generatedTests   GeneratedTest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -135,4 +136,30 @@ model SecurityFinding {
   @@index([analysisId])
   @@index([severity])
   @@index([category])
+}
+
+model GeneratedTest {
+  id String @id @default(cuid())
+
+  analysisId String
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String
+
+  type String
+
+  filePath       String
+  targetFunction String?
+
+  testCode String
+
+  rationale String
+
+  confidence Float
+
+  createdAt DateTime @default(now())
+
+  @@index([analysisId])
+  @@index([type])
 }

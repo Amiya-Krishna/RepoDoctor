@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 
 import type { AIProvider } from "./ai.provider.js";
+
 import { aiConfig } from "./ai.config.js";
 
 export class GroqProvider implements AIProvider {
@@ -47,6 +48,7 @@ export class GroqProvider implements AIProvider {
     const response =
       await this.client.chat.completions.create({
         model: aiConfig.groqModel,
+
         messages: [
           {
             role: "system",
@@ -57,6 +59,7 @@ export class GroqProvider implements AIProvider {
             content: userPrompt,
           },
         ],
+
         response_format: {
           type: "json_schema",
           json_schema: {
@@ -76,6 +79,12 @@ export class GroqProvider implements AIProvider {
       );
     }
 
-    return JSON.parse(content) as T;
+    try {
+      return JSON.parse(content) as T;
+    } catch {
+      throw new Error(
+        "Groq returned invalid JSON"
+      );
+    }
   }
 }

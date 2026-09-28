@@ -17,7 +17,8 @@
     "test:groq": "tsx src/test-groq.ts",
     "test:gemini": "tsx src/test-gemini.ts",
     "test:bug-agent": "tsx src/test-bug-agent.ts",
-    "test:security-agent": "tsx src/test-security-agent.ts"
+    "test:security-agent": "tsx src/test-security-agent.ts",
+    "test:test-generation": "tsx src/test-test-generation-agent.ts"
   },
   "keywords": [],
   "author": "",
