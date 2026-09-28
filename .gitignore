@@ -7,3 +7,8 @@ build/
 .vite/
 coverage/
 .DS_Store
+
+# Local AI agent test repositories
+bug-test-repo/
+security-test-repo/
+test-generation-repo/
