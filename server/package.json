@@ -19,7 +19,8 @@
     "test:bug-agent": "tsx src/test-bug-agent.ts",
     "test:security-agent": "tsx src/test-security-agent.ts",
     "test:test-generation": "tsx src/test-test-generation-agent.ts",
-    "test:risk-engine": "tsx src/test-risk-engine.ts"
+    "test:risk-engine": "tsx src/test-risk-engine.ts",
+    "test:analysis-pipeline": "tsx src/test-analysis-pipeline.ts"
   },
   "keywords": [],
   "author": "",

@@ -33,7 +33,13 @@ export const formatRepositoryContext = (
     );
   }
 
-  sections.push("\nSOURCE FILES:\n");
+  sections.push("\nALLOWED TARGET FILE PATHS:\n");
+
+  for (const file of context.files) {
+    sections.push(file.path);
+  }
+
+  sections.push("\nSOURCE FILE CONTENT:\n");
 
   for (const file of context.files) {
     sections.push(

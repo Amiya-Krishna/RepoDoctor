@@ -28,27 +28,47 @@ export class TestGenerationAgent {
     context: RepositoryContext,
     formattedContext: string
   ): string {
+    const availableFiles = context.files
+      .map((file) => file.path)
+      .join("\n");
+
     return `
-Generate automated tests for this repository.
-    
-Repository information:
-    
-Project type:
-    ${context.projectType ?? "unknown"}
-    
-Language:
-    ${context.language ?? "unknown"}
-    
-Framework:
-    ${context.framework ?? "unknown"}
-    
-Package manager:
-    ${context.packageManager ?? "unknown"}
-    
-Repository context:
-    
-    ${formattedContext}
-`;
+  Generate automated tests for this repository.
+
+  Repository information:
+
+  Project type:
+  ${context.projectType ?? "unknown"}
+
+  Language:
+  ${context.language ?? "unknown"}
+
+  Framework:
+  ${context.framework ?? "unknown"}
+
+  Package manager:
+  ${context.packageManager ?? "unknown"}
+
+  CRITICAL TARGET FILE RULE:
+
+  The following are the ONLY valid target files:
+
+  ${availableFiles}
+
+  For every generated test:
+
+  - targetFilePath MUST exactly equal one of the paths above.
+  - Do NOT invent a target file.
+  - Do NOT guess a filename.
+  - Do NOT change the path.
+  - Do NOT use an absolute path.
+  - Do NOT reference a file that is not listed above.
+  - If no suitable target file exists, do not generate a test for it.
+
+  Repository context:
+
+  ${formattedContext}
+  `;
   }
   
   private validateResult(
@@ -62,7 +82,9 @@ Repository context:
     }
     
     const validPaths = new Set(
-      context.files.map((file) => file.path)
+      context.files.map((file) =>
+        file.path.replace(/\\/g, "/")
+      )
     );
     
     for (const test of result.tests) {
@@ -79,7 +101,10 @@ Repository context:
       }
       
       // The source file being tested MUST exist.
-      if (!validPaths.has(test.targetFilePath)) {
+      const targetFilePath = test.targetFilePath
+        ?.replace(/\\/g, "/");
+
+      if (!targetFilePath || !validPaths.has(targetFilePath)) {
         throw new Error(
           `Generated test references unknown target file: ${test.targetFilePath}`
         );

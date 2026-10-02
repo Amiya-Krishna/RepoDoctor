@@ -96,7 +96,10 @@ const collectSourceFiles = async (
     const content = await fs.readFile(fullPath, "utf-8");
 
     files.push({
-      path: path.relative(rootDirectory, fullPath),
+      path: path
+        .relative(rootDirectory, fullPath)
+        .split(path.sep)
+        .join("/"),
       content,
       language: getLanguage(fullPath),
       size: stats.size,
@@ -112,7 +115,7 @@ export const buildRepositoryContext = async (
     language?: string;
     framework?: string;
     packageManager?: string;
-  }
+  } = {}
 ): Promise<RepositoryContext> => {
   const files: ContextFile[] = [];
 
