@@ -1,4 +1,4 @@
-# RepoDoctor AI — Current Errors / Fixes
+# RepoDoctor AI — Current Errors / Fixes (Updated through Day 15)
 
 This document records known issues, historical problems, and architectural fixes.
 
@@ -366,3 +366,209 @@ These are not necessarily errors; they are unfinished milestones:
 ## Current safety invariant
 
 > RepoDoctor must never modify, overwrite, force-push, delete, or directly merge into a user's pre-existing GitHub repository. All analysis and repair work must happen in isolated disposable environments, with changes delivered through a dedicated repair branch and Pull Request only after verification.
+
+
+---
+
+# Day 11–15 Errors and Fixes
+
+## 11. OpenRouter Structured Response Failure
+
+### Symptom
+
+Examples observed:
+
+```text
+OpenRouter structured request failed
+OpenRouter returned invalid JSON
+OpenRouter returned an empty structured response
+```
+
+### Behavior
+
+`AIProviderManager` automatically continues to the next provider.
+
+Observed:
+
+```text
+OpenRouter → failure
+Groq → success
+```
+
+### Decision
+
+Keep:
+
+```text
+OpenRouter → Groq → Gemini
+```
+
+Do not replace `AIProviderManager` with a `FallbackAIProvider`.
+
+---
+
+## 12. Generated Test Referenced Unknown File on Windows
+
+### Symptom
+
+```text
+Generated test references unknown target file: src/auth.ts
+```
+
+### Cause
+
+Windows context paths used:
+
+```text
+src\auth.ts
+```
+
+while AI output used:
+
+```text
+src/auth.ts
+```
+
+### Fix
+
+Normalize repository-relative paths with `/` before validation.
+
+---
+
+## 13. Risk Engine
+
+### Result
+
+Risk calculation was moved into deterministic application code rather than relying on the AI to decide the final risk score.
+
+This provides repeatable scoring and clear severity/priority mapping.
+
+---
+
+## 14. `buildRepositoryContext` Argument Error
+
+### Symptom
+
+TypeScript build error:
+
+```text
+Expected 2-3 arguments, but got 1.
+```
+
+### Cause
+
+The context builder requires:
+
+```ts
+workspacePath
+repositoryId
+metadata?
+```
+
+### Correct call
+
+```ts
+const context =
+  await buildRepositoryContext(
+    repositoryPath,
+    "fix-agent-test-repository"
+  );
+```
+
+### Incorrect call
+
+```ts
+const context =
+  await buildRepositoryContext(
+    repositoryPath
+  );
+```
+
+---
+
+## 15. Fix Agent Returned No Changes
+
+### Symptom
+
+```text
+Error: Fix Agent returned no changes.
+```
+
+### Cause
+
+The initial test fixture already contained a division-by-zero guard:
+
+```ts
+if (b === 0) {
+  throw new Error("Cannot divide by zero");
+}
+```
+
+The finding asked the AI to add the same protection, so a valid agent response could contain no changes.
+
+### Fix
+
+The test fixture was intentionally changed to:
+
+```ts
+return a / b;
+```
+
+This created a real defect for the Fix Agent to repair.
+
+### Result
+
+Fix Agent generated a valid `REPLACE` proposal.
+
+---
+
+## 16. Fix Agent Safety Boundary
+
+Fix Agent must not:
+
+```text
+modify files
+run shell commands
+run repository code
+install dependencies
+perform git operations
+claim a fix was tested
+```
+
+It only proposes structured changes.
+
+---
+
+## 17. FixProposal Database Table Not Yet Present
+
+### Symptom
+
+Prisma Studio reported:
+
+```text
+The table public.FixProposal does not exist in the current database.
+```
+
+### Current state
+
+The Prisma schema contains the `FixProposal` model and:
+
+```text
+npx prisma generate
+```
+
+succeeds.
+
+However, the migration adding the table has not successfully been applied to the Neon database.
+
+### Safety rule
+
+Do NOT run:
+
+```text
+npx prisma migrate reset
+```
+
+because existing database data must be preserved.
+
+The migration/database connectivity issue must be resolved with a non-destructive approach.

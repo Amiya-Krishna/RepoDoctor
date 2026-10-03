@@ -1,6 +1,6 @@
-# RepoDoctor AI — Project Status
+# RepoDoctor AI — Project Status (Updated through Day 15)
 
-**Current milestone:** Day 12 — Test Generation Agent completed/planned implementation baseline  
+**Current milestone:** Day 15 — Fix Agent proposal generation completed  
 **Project:** RepoDoctor AI  
 **Scope:** Autonomous repository analysis and repair for JavaScript/TypeScript GitHub repositories
 
@@ -240,3 +240,141 @@ The current system still does **not** automatically:
 After Day 13:
 - Day 14: Unified Analysis Pipeline
 - Day 15+: Isolated repair, Dockerized verification, retry/replanning, and GitHub PR generation
+
+
+---
+
+# Day 11–15 Current Status
+
+## Day 11 — Security Analysis
+
+**Status:** Completed.
+
+Security analysis was integrated as a structured AI agent using the common AI provider abstraction.
+
+## Day 12 — Test Generation Agent
+
+**Status:** Completed.
+
+Generated tests are validated against repository context, including target-file validation.
+
+## Day 13 — Risk & Severity Engine
+
+**Status:** Completed.
+
+Implemented deterministic risk calculation and persistence.
+
+Main files:
+
+```text
+src/risk/risk.types.ts
+src/risk/risk.rules.ts
+src/risk/risk.calculator.ts
+src/risk/risk.engine.ts
+src/services/risk-assessment.service.ts
+src/test-risk-engine.ts
+```
+
+## Day 14 — Unified Analysis Pipeline
+
+**Status:** Completed and tested.
+
+The pipeline coordinates bug detection, security detection, test generation, persistence, and risk assessment.
+
+Observed successful test result:
+
+```text
+Bugs: 2
+Security findings: 2
+Generated tests: 3
+Risk score: 81
+Risk level: HIGH
+Priority: P1
+Critical findings: 0
+High findings: 4
+Medium findings: 0
+Low findings: 0
+```
+
+Windows path normalization was added so repository paths use `/` consistently for AI-generated target paths.
+
+## Day 15 — Fix Agent
+
+**Status:** Completed.
+
+Implemented:
+
+```text
+FixAgent
+FixResult schema/types
+Fix prompt
+Fix generation service
+Fix proposal service
+FixProposal Prisma model
+Fix Agent test
+```
+
+The Fix Agent generates proposed code changes without modifying the repository.
+
+Successful test behavior:
+
+```text
+OpenRouter → failed with empty structured response
+Groq       → succeeded
+FixAgent   → generated valid REPLACE proposal
+Validation → passed
+Repository → unchanged
+```
+
+Example generated proposal:
+
+```text
+src/calculator.ts
+REPLACE
+Lines 1-6
+```
+
+The proposal added a division-by-zero guard.
+
+## Current Database Caveat
+
+The Prisma schema contains `FixProposal`, but the corresponding database table was not successfully applied to the Neon database during the latest migration attempt.
+
+Observed Prisma Studio error:
+
+```text
+The table public.FixProposal does not exist in the current database.
+```
+
+Do not use `prisma migrate reset` because existing database data must be preserved.
+
+## Current Build State
+
+The TypeScript build was successfully made to compile after correcting the
+`buildRepositoryContext` call contract.
+
+The current signature requires:
+
+```ts
+buildRepositoryContext(
+  workspacePath,
+  repositoryId,
+  metadata?
+)
+```
+
+## Current AI Provider Architecture
+
+```text
+OpenRouter → Primary
+Groq       → Secondary
+Gemini     → Tertiary
+```
+
+Managed through:
+
+```text
+AIProviderManager
+```
+
+Do not introduce `FallbackAIProvider`.
