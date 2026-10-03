@@ -21,7 +21,8 @@
     "test:test-generation": "tsx src/test-test-generation-agent.ts",
     "test:risk-engine": "tsx src/test-risk-engine.ts",
     "test:analysis-pipeline": "tsx src/test-analysis-pipeline.ts",
-    "test:fix-agent": "tsx src/test-fix-agent.ts"
+    "test:fix-agent": "tsx src/test-fix-agent.ts",
+    "test:repair-workspace": "tsx src/test-repair-workspace.ts"
   },
   "keywords": [],
   "author": "",

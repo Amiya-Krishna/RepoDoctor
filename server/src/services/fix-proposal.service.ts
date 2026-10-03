@@ -26,7 +26,9 @@ export const saveFixProposal = async (
 
       reasoning: result.reasoning,
 
-      changes: result.changes,
+      changes: JSON.parse(
+        JSON.stringify(result.changes)
+      ),
 
       status: "PROPOSED",
     },
