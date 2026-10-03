@@ -70,6 +70,7 @@ model Analysis {
   securityFindings SecurityFinding[]
   generatedTests   GeneratedTest[]
   riskAssessments  RiskAssessment[]
+  fixProposals FixProposal[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -186,4 +187,33 @@ model RiskAssessment {
   @@index([findingId])
   @@index([level])
   @@index([priority])
+}
+
+model FixProposal {
+  id          String   @id @default(cuid())
+
+  analysisId  String
+  analysis    Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  findingId   String
+  source      String
+
+  title       String
+  summary     String
+
+  risk        String
+  confidence  Float
+
+  reasoning   String
+
+  changes     Json
+
+  status      String   @default("PROPOSED")
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([analysisId])
+  @@index([findingId])
+  @@index([status])
 }
