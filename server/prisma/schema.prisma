@@ -66,11 +66,12 @@ model Analysis {
   startedAt   DateTime?
   completedAt DateTime?
 
-  bugFindings      BugFinding[]
-  securityFindings SecurityFinding[]
-  generatedTests   GeneratedTest[]
-  riskAssessments  RiskAssessment[]
-  fixProposals FixProposal[]
+  bugFindings         BugFinding[]
+  securityFindings    SecurityFinding[]
+  generatedTests      GeneratedTest[]
+  riskAssessments     RiskAssessment[]
+  fixProposals        FixProposal[]
+  verificationResults VerificationResult[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -190,30 +191,61 @@ model RiskAssessment {
 }
 
 model FixProposal {
-  id          String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  analysisId  String
-  analysis    Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  analysisId String
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
 
-  findingId   String
-  source      String
+  findingId String
+  source    String
 
-  title       String
-  summary     String
+  title   String
+  summary String
 
-  risk        String
-  confidence  Float
+  risk       String
+  confidence Float
 
-  reasoning   String
+  reasoning String
 
-  changes     Json
+  changes Json
 
-  status      String   @default("PROPOSED")
+  status String @default("PROPOSED")
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([analysisId])
   @@index([findingId])
+  @@index([status])
+}
+
+model VerificationResult {
+  id String @id @default(cuid())
+
+  analysisId String
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  findingId     String
+  fixProposalId String
+
+  status String
+
+  title   String
+  summary String
+
+  confidence Float
+
+  evidence Json
+
+  reasoning String
+
+  testPassed         Boolean
+  regressionDetected Boolean
+
+  createdAt DateTime @default(now())
+
+  @@index([analysisId])
+  @@index([findingId])
+  @@index([fixProposalId])
   @@index([status])
 }
