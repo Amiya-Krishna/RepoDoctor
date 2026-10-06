@@ -50,6 +50,13 @@ export const runDockerTest = async (
     input.pidsLimit ??
     DEFAULT_PIDS_LIMIT;
 
+  const environmentArgs = Object.entries(
+      input.environment ?? {},
+    ).flatMap(([key, value]) => [
+      "-e",
+      `${key}=${value}`,
+    ]);
+
   if (input.testCommand.length === 0) {
     throw new Error(
       "Docker test command cannot be empty.",
@@ -107,6 +114,8 @@ export const runDockerTest = async (
       "-w",
       "/workspace/repository",
 
+      ...environmentArgs,
+      
       "node:22-bookworm-slim",
 
       ...input.testCommand,

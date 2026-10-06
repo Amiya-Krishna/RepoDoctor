@@ -5,6 +5,7 @@ export interface DockerTestInput {
   memoryLimit?: string;
   cpuLimit?: string;
   pidsLimit?: number;
+  environment?: Record<string, string>;
 }
 
 export interface DockerTestResult {

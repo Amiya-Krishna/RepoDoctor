@@ -249,3 +249,48 @@ model VerificationResult {
   @@index([fixProposalId])
   @@index([status])
 }
+
+model DockerTestRun {
+  id String @id @default(cuid())
+
+  repositoryPath String
+
+  testCommand Json
+
+  success  Boolean
+  exitCode Int?
+  stdout   String
+  stderr   String
+
+  durationMs Int
+  timedOut   Boolean
+
+  createdAt DateTime @default(now())
+
+  @@index([success])
+  @@index([timedOut])
+}
+
+model RepairAttempt {
+  id String @id @default(cuid())
+
+  analysisId String
+  findingId  String
+
+  attemptNumber Int
+
+  status String
+
+  fixProposalId        String?
+  dockerTestRunId      String?
+  verificationResultId String?
+
+  failureReason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([analysisId])
+  @@index([findingId])
+  @@index([attemptNumber])
+  @@index([status])
+}
