@@ -1,41 +1,35 @@
-import { FixAgent } from "../agents/fix.agent.js";
-import { createAIProvider } from "../ai/ai.provider.factory.js";
-import { saveDockerTestResult } from "./docker-test-result.service.js";
-import { saveFixProposal } from "./fix-proposal.service.js";
+import { FixAgent } from "../../agents/fix.agent.js";
+import { createAIProvider } from "../../ai/ai.provider.factory.js";
+import { saveDockerTestResult } from "../../services/docker-test-result.service.js";
+import { saveFixProposal } from "../../services/fix-proposal.service.js";
 import {
   createRepairAttempt,
   updateRepairAttempt,
-} from "./repair-attempt.service.js";
-import { saveVerificationResult } from "./verification-result.service.js";
-import { verifyFix } from "./verification.service.js";
+} from "../../services/repair-attempt.service.js";
+import { saveVerificationResult } from "../../services/verification-result.service.js";
+import { verifyFix } from "../../services/verification.service.js";
 
-import { buildRepositoryContext } from "../context/context.builder.js";
-import { formatRepositoryContext } from "../context/context.formatter.js";
+import { buildRepositoryContext } from "../../context/context.builder.js";
+import { formatRepositoryContext } from "../../context/context.formatter.js";
 
 import {
   createRepairWorkspace,
   removeRepairWorkspace,
-} from "../repair/repair.workspace.js";
+} from "../repair.workspace.js";
 
-import { applyFixResult } from "../repair/repair.patch.js";
+import { applyFixResult } from "../repair.patch.js";
 
-import { runDockerTest } from "../execution/docker.runner.js";
+import { runDockerTest } from "../../execution/docker.runner.js";
 
-import {
-  DEFAULT_RETRY_POLICY,
-  canRetry,
-} from "../repair/retry/retry.policy.js";
+import { DEFAULT_RETRY_POLICY, canRetry } from "./retry.policy.js";
 
-import { buildReplanningContext } from "../repair/retry/retry.replanner.js";
+import { buildReplanningContext } from "./retry.replanner.js";
 
-import type { BugFinding } from "../agents/bug-detection.types.js";
-import type { SecurityFinding } from "../agents/security.types.js";
-import type { VerificationResult } from "../agents/verification.types.js";
-import type { DockerTestResult } from "../execution/docker.types.js";
-import type {
-  RetryAttemptResult,
-  RetryLoopResult,
-} from "../repair/retry/retry.types.js";
+import type { BugFinding } from "../../agents/bug-detection.types.js";
+import type { SecurityFinding } from "../../agents/security.types.js";
+import type { VerificationResult } from "../../agents/verification.types.js";
+import type { DockerTestResult } from "../../execution/docker.types.js";
+import type { RetryAttemptResult, RetryLoopResult } from "./retry.types.js";
 
 type Finding = BugFinding | SecurityFinding;
 

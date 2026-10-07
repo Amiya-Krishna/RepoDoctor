@@ -25,7 +25,8 @@
     "test:repair-workspace": "tsx src/test-repair-workspace.ts",
     "test:docker-runner": "tsx src/test-docker-runner.ts",
     "test:verification-agent": "tsx src/test-verification-agent.ts",
-    "test:repair-retry": "tsx src/test-repair-retry.ts"
+    "test:repair-retry": "tsx src/test-repair-retry.ts",
+    "test:github-pr": "tsx src/test-github-pr.ts"
   },
   "keywords": [],
   "author": "",

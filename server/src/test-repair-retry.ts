@@ -1,5 +1,5 @@
 import { prisma } from "./config/prisma.js";
-import { runRepairRetryLoop } from "./services/repair.retry.service.js";
+import { runRepairRetryLoop } from "./repair/retry/repair.retry.service.js";
 
 const repositoryPath = process.argv[2];
 
