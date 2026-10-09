@@ -338,8 +338,9 @@ model RepairJob {
 
   status String
 
-  currentAttempt Int @default(0)
-  maxAttempts    Int @default(3)
+  currentAttempt Int                @default(0)
+  maxAttempts    Int                @default(3)
+  attemptHistory RepairJobAttempt[]
 
   errorMessage String?
 
@@ -350,4 +351,21 @@ model RepairJob {
   @@index([analysisId])
   @@index([findingId])
   @@index([status])
+}
+
+model RepairJobAttempt {
+  id                 String   @id @default(cuid())
+  repairJobId        String
+  attemptNumber      Int
+  status             String
+  testPassed         Boolean
+  verificationStatus String
+  summary            String   @db.Text
+  durationMs         Int?
+  createdAt          DateTime @default(now())
+
+  repairJob RepairJob @relation(fields: [repairJobId], references: [id], onDelete: Cascade)
+
+  @@unique([repairJobId, attemptNumber])
+  @@index([repairJobId, createdAt])
 }

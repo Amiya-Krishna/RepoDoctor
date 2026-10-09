@@ -19,6 +19,10 @@ import type {
   SecurityFinding,
 } from "../agents/security.types.js";
 
+import {
+  saveRepairAttempt,
+} from "./repair-job-history.service.js";
+
 type RepairFinding =
   | BugFinding
   | SecurityFinding;
@@ -89,6 +93,22 @@ export const runAutonomousRepair = async (
 
     const currentAttempt =
       result.attempts.length;
+
+      for (const attempt of result.attempts) {
+      await saveRepairAttempt({
+        repairJobId: repairJob.id,
+        attemptNumber: attempt.attemptNumber,
+        status: attempt.status,
+        testPassed: attempt.status === "VERIFIED",
+        verificationStatus:
+          attempt.status === "VERIFIED"
+            ? "VERIFIED"
+            : attempt.status === "INCONCLUSIVE"
+              ? "INCONCLUSIVE"
+              : "NOT_VERIFIED",
+        summary: attempt.summary,
+      });
+    }
 
     await updateRepairJob(
       repairJob.id,
