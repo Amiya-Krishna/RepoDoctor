@@ -73,6 +73,7 @@ model Analysis {
   fixProposals        FixProposal[]
   verificationResults VerificationResult[]
   pullRequests        PullRequest[]
+  repairJobs          RepairJob[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -326,5 +327,27 @@ model PullRequest {
   @@index([findingId])
   @@index([fixProposalId])
   @@index([verificationResultId])
+  @@index([status])
+}
+
+model RepairJob {
+  id String @id @default(cuid())
+
+  analysisId String
+  findingId  String
+
+  status String
+
+  currentAttempt Int @default(0)
+  maxAttempts    Int @default(3)
+
+  errorMessage String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  analysis  Analysis @relation(fields: [analysisId], references: [id])
+
+  @@index([analysisId])
+  @@index([findingId])
   @@index([status])
 }

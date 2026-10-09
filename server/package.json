@@ -26,7 +26,8 @@
     "test:docker-runner": "tsx src/test-docker-runner.ts",
     "test:verification-agent": "tsx src/test-verification-agent.ts",
     "test:repair-retry": "tsx src/test-repair-retry.ts",
-    "test:github-pr": "tsx src/test-github-pr.ts"
+    "test:github-pr": "tsx src/test-github-pr.ts",
+    "test:autonomous-repair": "tsx src/test-autonomous-repair.ts"
   },
   "keywords": [],
   "author": "",
