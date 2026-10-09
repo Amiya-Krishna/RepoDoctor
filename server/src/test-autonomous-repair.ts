@@ -167,6 +167,35 @@ try {
       2,
     ),
   );
+
+  const savedJob = await prisma.repairJob.findFirst({
+    where: {
+      analysisId: analysis.id,
+    },
+    include: {
+      attemptHistory: {
+        orderBy: {
+          attemptNumber: "asc",
+        },
+      },
+    },
+  });
+
+  console.log(
+    "Persisted attempt history:",
+    JSON.stringify(
+      savedJob?.attemptHistory ?? [],
+      null,
+      2,
+    ),
+  );
+
+  console.log(
+    "Persisted attempt count:",
+    savedJob?.attemptHistory.length ?? 0,
+  );
+
+
 } finally {
   await prisma.repairJob.deleteMany({
     where: {
