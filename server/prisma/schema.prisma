@@ -387,3 +387,18 @@ model RepositoryMemoryChunk {
   @@unique([repositoryId, contentHash])
   @@index([repositoryId, sourceType])
 }
+
+model SecurityAuditEvent {
+  id          String   @id @default(cuid())
+  eventType   String
+  actorId     String?
+  repositoryId String?
+  repairJobId String?
+  outcome     String
+  details     Json?
+  createdAt   DateTime @default(now())
+
+  @@index([eventType, createdAt])
+  @@index([repositoryId, createdAt])
+  @@index([repairJobId, createdAt])
+}

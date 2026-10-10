@@ -4,8 +4,19 @@ import authRoutes from "./routes/auth.routes.js";
 import githubRoutes from "./routes/github.routes.js";
 import repositoryRoutes from "./routes/repository.routes.js";
 import repairRoutes from "./routes/repair.routes.js";
+import {
+  apiRateLimiter,
+  authRateLimiter,
+} from "./middleware/rate-limit.middleware.js";
 
 const app = express();
+
+// Register before your route handlers.
+app.use("/api", apiRateLimiter);
+
+// Apply only to your actual login/register router.
+// Replace authRouter with the router name in your project.
+app.use("/api/auth", authRateLimiter, authRoutes);
 
 app.use(cors({
   origin: process.env.FRONTEND_URL ?? "http://localhost:5173",
