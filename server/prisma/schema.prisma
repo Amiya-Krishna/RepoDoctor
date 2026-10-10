@@ -23,20 +23,21 @@ model User {
 }
 
 model Repository {
-  id            String     @id @default(cuid())
-  githubId      String     @unique
+  id            String                  @id @default(cuid())
+  githubId      String                  @unique
   name          String
   fullName      String
   ownerLogin    String
   defaultBranch String
-  private       Boolean    @default(false)
+  private       Boolean                 @default(false)
   htmlUrl       String
   cloneUrl      String
   userId        String
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
   analyses      Analysis[]
-  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memoryChunks  RepositoryMemoryChunk[]
 
   @@index([userId])
 }
@@ -47,7 +48,7 @@ model Analysis {
   repositoryId String
   repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
 
-  status AnalysisStatus @default(PENDING)
+  status    AnalysisStatus @default(PENDING)
   sourceRef String?
 
   projectType    String?
@@ -369,4 +370,20 @@ model RepairJobAttempt {
 
   @@unique([repairJobId, attemptNumber])
   @@index([repairJobId, createdAt])
+}
+
+model RepositoryMemoryChunk {
+  id           String     @id @default(cuid())
+  repositoryId String
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  sourceType  String
+  sourcePath  String
+  contentHash String
+  content     String   @db.Text
+  embedding   Json
+  createdAt   DateTime @default(now())
+
+  @@unique([repositoryId, contentHash])
+  @@index([repositoryId, sourceType])
 }

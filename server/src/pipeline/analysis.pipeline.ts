@@ -44,6 +44,12 @@ import type {
   AnalysisPipelineResult,
 } from "./analysis.pipeline.types.js";
 
+import {
+  indexRepositoryMemory,
+  retrieveRepositoryMemory,
+  formatRetrievedMemory,
+} from "../services/repository-memory.service.js";
+
 export const runAnalysisPipeline = async (
   input: AnalysisPipelineInput
 ): Promise<AnalysisPipelineResult> => {
@@ -62,15 +68,63 @@ export const runAnalysisPipeline = async (
     // STAGE 1: BUILD CONTEXT
     // ========================================
 
-    const context =
-      await buildRepositoryContext(
+    
+    const context = await buildRepositoryContext(
+      repositoryPath,
+      repositoryId,
+    );
+
+    let formattedContext = formatRepositoryContext(context);
+
+    await onProgress?.(
+      "repository-memory",
+      "Indexing and retrieving repository memory",
+      28,
+    );
+
+    try {
+      const indexResult = await indexRepositoryMemory(
         repositoryPath,
-        repositoryId
+        repositoryId,
       );
 
-    const formattedContext =
-      formatRepositoryContext(context);
-    await onProgress?.("bug-analysis", "Running bug detection", 35);
+      const memoryQuery = [
+        "Repository architecture, coding conventions, dependencies and tests",
+        "Previous bugs, security issues, root causes and fixes",
+        context.projectType ?? "",
+        context.language ?? "",
+        context.framework ?? "",
+        context.packageManager ?? "",
+        ...context.files.map((file) => file.path),
+      ].join("\n");
+
+      const memories = await retrieveRepositoryMemory(
+        repositoryId,
+        memoryQuery,
+        6,
+      );
+
+      formattedContext +=
+        "\n\n" + formatRetrievedMemory(memories);
+
+      console.log(
+        `[RAG] Indexed ${indexResult.indexedChunks} chunks; retrieved ${memories.length}`,
+      );
+    } catch (error) {
+      // RAG should degrade gracefully during rollout.
+      // The original context remains available to the agents.
+      console.error(
+        "[RAG] Repository memory unavailable; continuing with source context.",
+        error,
+      );
+
+      await onProgress?.(
+        "repository-memory-warning",
+        "Repository memory unavailable; continuing without retrieved memory",
+        30,
+      );
+    }
+
 
     // ========================================
     // STAGE 2: CREATE AI PROVIDER
