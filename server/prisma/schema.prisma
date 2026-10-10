@@ -48,6 +48,7 @@ model Analysis {
   repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
 
   status AnalysisStatus @default(PENDING)
+  sourceRef String?
 
   projectType    String?
   language       String?

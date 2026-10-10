@@ -6,8 +6,8 @@ import type {
 const GITHUB_API_URL = "https://api.github.com";
 const GITHUB_API_VERSION = "2026-03-10";
 
-const getGitHubToken = (): string => {
-  const token = process.env.GITHUB_TOKEN;
+const getGitHubToken = (tokenOverride?: string): string => {
+  const token = tokenOverride ?? process.env.GITHUB_TOKEN;
 
   if (!token) {
     throw new Error(
@@ -21,8 +21,9 @@ const getGitHubToken = (): string => {
 const githubRequest = async <T>(
   path: string,
   options: RequestInit = {},
+  tokenOverride?: string,
 ): Promise<T> => {
-  const token = getGitHubToken();
+  const token = getGitHubToken(tokenOverride);
 
   const response = await fetch(
     `${GITHUB_API_URL}${path}`,
@@ -94,6 +95,7 @@ export const createPullRequest = async (
         maintainer_can_modify: false,
       }),
     },
+    input.token,
   );
 
   return {

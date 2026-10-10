@@ -30,4 +30,43 @@ export interface Analysis {
 
   createdAt: string;
   completedAt: string | null;
+  bugFindings?: AnalysisFinding[];
+  securityFindings?: AnalysisFinding[];
+  generatedTests?: GeneratedTestSummary[];
+  riskAssessments?: RiskAssessmentSummary[];
+}
+export interface AnalysisFinding {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  severity: string;
+  filePath: string;
+  lineStart: number;
+  lineEnd: number;
+  evidence: string;
+  suggestedFix: string;
+  confidence: number;
+}
+
+export interface GeneratedTestSummary {
+  id: string;
+  title: string;
+  description: string;
+  type: string;
+  filePath: string;
+  targetFunction: string | null;
+  testCode: string;
+  rationale: string;
+  confidence: number;
+}
+
+export interface RiskAssessmentSummary {
+  id: string;
+  findingId: string;
+  source: string;
+  score: number;
+  level: string;
+  priority: string;
+  factors: unknown;
 }

@@ -30,6 +30,26 @@ import type { SecurityFinding } from "../../agents/security.types.js";
 import type { VerificationResult } from "../../agents/verification.types.js";
 import type { DockerTestResult } from "../../execution/docker.types.js";
 import type { RetryAttemptResult, RetryLoopResult } from "./retry.types.js";
+import type { RepairWorkspace } from "../repair.types.js";
+
+export interface VerifiedRepairPublicationContext {
+  workspace: RepairWorkspace;
+  verification: VerificationResult;
+  verificationResultId: string;
+  analysisId: string;
+  findingId: string;
+  fixProposalId: string;
+  findingTitle: string;
+}
+
+export type VerifiedRepairPublisher = (
+  context: VerifiedRepairPublicationContext,
+) => Promise<{
+  number: number;
+  url: string;
+  branchName: string;
+  commitSha: string;
+}>;
 
 type Finding = BugFinding | SecurityFinding;
 
@@ -40,6 +60,8 @@ export const runRepairRetryLoop = async (
   finding: Finding,
   sourceRepositoryPath: string,
   testCommand: string[],
+  onVerified?: VerifiedRepairPublisher,
+  onProgress?: (stage: string, message: string, percent: number) => Promise<void> | void,
 ): Promise<RetryLoopResult> => {
   const aiProvider = createAIProvider();
   const fixAgent = new FixAgent(aiProvider);
@@ -54,6 +76,12 @@ export const runRepairRetryLoop = async (
     attemptNumber <= DEFAULT_RETRY_POLICY.maxAttempts;
     attemptNumber++
   ) {
+    await onProgress?.(
+      "repair-attempt",
+      `Starting repair attempt ${attemptNumber} of ${DEFAULT_RETRY_POLICY.maxAttempts}`,
+      Math.min(15 + (attemptNumber - 1) * 25, 75),
+    );
+
     const attempt = await createRepairAttempt(
       analysisId,
       findingId,
@@ -121,6 +149,7 @@ export const runRepairRetryLoop = async (
         repositoryContext,
         formattedContext,
       );
+      await onProgress?.("fix-generated", `Generated fix proposal for attempt ${attemptNumber}`, 40 + (attemptNumber - 1) * 15);
 
       const source =
         "category" in finding &&
@@ -162,6 +191,7 @@ export const runRepairRetryLoop = async (
       /*
        * Execute tests through Docker.
        */
+      await onProgress?.("testing", `Running isolated Docker tests for attempt ${attemptNumber}`, 55 + (attemptNumber - 1) * 10);
       const testResult = await runDockerTest({
         repositoryPath: workspace.repositoryPath,
         testCommand,
@@ -189,6 +219,7 @@ export const runRepairRetryLoop = async (
       /*
        * Verification receives the actual Docker result.
        */
+      await onProgress?.("verification", `Verifying attempt ${attemptNumber}`, 75 + (attemptNumber - 1) * 5);
       const verification = await verifyFix(finding, fixResult, testResult);
 
       const verificationRecord = await saveVerificationResult(
@@ -202,6 +233,21 @@ export const runRepairRetryLoop = async (
        * VERIFIED is the only successful terminal state.
        */
       if (verification.status === "VERIFIED") {
+        // Publishing runs before the finally block removes the verified workspace.
+        // Callers may omit publication for isolated unit tests, but production
+        // repair requests supply this callback.
+        const pullRequest = onVerified
+          ? await onVerified({
+              workspace,
+              verification,
+              verificationResultId: verificationRecord.id,
+              analysisId,
+              findingId,
+              fixProposalId: proposal.id,
+              findingTitle: finding.title,
+            })
+          : undefined;
+
         await updateRepairAttempt(attempt.id, {
           status: "VERIFIED",
           fixProposalId: proposal.id,
@@ -222,6 +268,7 @@ export const runRepairRetryLoop = async (
           status: "VERIFIED",
           attempts,
           successfulAttempt: attemptNumber,
+          ...(pullRequest ? { pullRequest } : {}),
         };
       }
 

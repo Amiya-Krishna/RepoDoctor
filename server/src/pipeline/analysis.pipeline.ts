@@ -49,11 +49,14 @@ export const runAnalysisPipeline = async (
 ): Promise<AnalysisPipelineResult> => {
   const {
     analysisId,
+    repositoryId,
     repositoryPath,
+    onProgress,
   } = input;
 
   try {
     await markAnalysisRunning(analysisId);
+    await onProgress?.("context", "Building repository context", 20);
 
     // ========================================
     // STAGE 1: BUILD CONTEXT
@@ -62,11 +65,12 @@ export const runAnalysisPipeline = async (
     const context =
       await buildRepositoryContext(
         repositoryPath,
-        analysisId
+        repositoryId
       );
 
     const formattedContext =
       formatRepositoryContext(context);
+    await onProgress?.("bug-analysis", "Running bug detection", 35);
 
     // ========================================
     // STAGE 2: CREATE AI PROVIDER
@@ -108,6 +112,7 @@ export const runAnalysisPipeline = async (
     // STAGE 4: SECURITY ANALYSIS
     // ========================================
 
+    await onProgress?.("security-analysis", "Running security analysis", 50);
     const securityAgent =
       new SecurityAgent(aiProvider);
 
@@ -137,6 +142,7 @@ export const runAnalysisPipeline = async (
     // STAGE 5: TEST GENERATION
     // ========================================
 
+    await onProgress?.("test-generation", "Generating test proposals", 65);
     const testAgent =
       new TestGenerationAgent(aiProvider);
 
@@ -187,6 +193,7 @@ export const runAnalysisPipeline = async (
     // STAGE 7: RISK ENGINE
     // ========================================
 
+    await onProgress?.("risk-assessment", "Calculating finding risk", 80);
     const evaluatedFindings =
       evaluateFindings(riskInputs);
 
@@ -212,6 +219,7 @@ export const runAnalysisPipeline = async (
       analysisId,
       context
     );
+    await onProgress?.("completed", "Repository analysis completed", 100);
 
     return {
       analysisId,

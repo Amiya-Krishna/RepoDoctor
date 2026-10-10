@@ -8,13 +8,16 @@ export interface CreateRepairPullRequestInput {
   baseBranch: string;
   title: string;
   body: string;
+  owner?: string;
+  repo?: string;
+  token?: string;
 }
 
 export const createRepairPullRequest = async (
   input: CreateRepairPullRequestInput,
 ): Promise<GitHubPullRequest> => {
-  const owner = process.env.GITHUB_OWNER;
-  const repo = process.env.GITHUB_REPO;
+  const owner = input.owner ?? process.env.GITHUB_OWNER;
+  const repo = input.repo ?? process.env.GITHUB_REPO;
 
   if (!owner) {
     throw new Error(
@@ -56,5 +59,6 @@ export const createRepairPullRequest = async (
     title: input.title,
     body: input.body,
     draft: false,
+    token: input.token,
   });
 };

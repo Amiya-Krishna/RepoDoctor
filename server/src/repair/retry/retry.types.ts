@@ -31,5 +31,11 @@ export interface RetryLoopResult {
   attempts: RetryAttemptResult[];
 
   successfulAttempt?: number;
+  pullRequest?: {
+    number: number;
+    url: string;
+    branchName: string;
+    commitSha: string;
+  };
 }
 

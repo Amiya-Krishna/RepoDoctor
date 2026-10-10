@@ -27,7 +27,16 @@
     "test:verification-agent": "tsx src/test-verification-agent.ts",
     "test:repair-retry": "tsx src/test-repair-retry.ts",
     "test:github-pr": "tsx src/test-github-pr.ts",
-    "test:autonomous-repair": "tsx src/test-autonomous-repair.ts"
+    "test:autonomous-repair": "tsx src/test-autonomous-repair.ts",
+    "worker": "tsx src/workers/scan.worker.ts",
+    "test:repair-job-history": "tsx src/test-repair-job-history.ts",
+    "test:repair-job-pagination": "tsx src/test-repair-job-pagination.ts",
+    "test:repair-job-metrics": "tsx src/test-repair-job-metrics.ts",
+    "test:scan-queue": "tsx src/test-scan-queue.ts",
+    "repair-worker": "tsx src/workers/repair.worker.ts",
+    "test:repair-queue": "tsx src/test-repair-queue.ts",
+    "test:webhook-signature": "tsx src/test-github-webhook-signature.ts",
+    "test:static-security": "tsx src/test-static-security-scanner.ts"
   },
   "keywords": [],
   "author": "",
@@ -43,7 +52,9 @@
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "openai": "^7.23.0",
-    "prisma": "^6.19.3"
+    "prisma": "^6.19.3",
+    "bullmq": "^5.58.5",
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

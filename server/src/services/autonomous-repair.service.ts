@@ -1,6 +1,11 @@
 import {
   runRepairRetryLoop,
+  type VerifiedRepairPublisher,
 } from "../repair/retry/repair.retry.service.js";
+import {
+  publishVerifiedRepairWithCleanup,
+  type RepairPublicationConfig,
+} from "./pull-request.service.js";
 
 import {
   createRepairJob,
@@ -37,6 +42,8 @@ export interface AutonomousRepairInput {
   sourceRepositoryPath: string;
 
   testCommand: string[];
+  publication?: RepairPublicationConfig;
+  onProgress?: (stage: string, message: string, percent: number) => Promise<void> | void;
 }
 
 export const runAutonomousRepair = async (
@@ -81,6 +88,29 @@ export const runAutonomousRepair = async (
     );
 
   try {
+    const publication = input.publication;
+    const onVerified: VerifiedRepairPublisher | undefined = publication
+      ? async (context) => {
+          const saved = await publishVerifiedRepairWithCleanup(
+            context.workspace,
+            context.verification,
+            context.findingTitle,
+            context.verificationResultId,
+            context.analysisId,
+            context.findingId,
+            context.fixProposalId,
+            publication,
+          );
+
+          return {
+            number: saved.pullRequestNumber,
+            url: saved.pullRequestUrl,
+            branchName: saved.branchName,
+            commitSha: saved.commitSha,
+          };
+        }
+      : undefined;
+
     const result =
       await runRepairRetryLoop(
         input.analysisId,
@@ -89,6 +119,8 @@ export const runAutonomousRepair = async (
         input.finding,
         input.sourceRepositoryPath,
         input.testCommand,
+        onVerified,
+        input.onProgress,
       );
 
     const currentAttempt =
@@ -120,6 +152,7 @@ export const runAutonomousRepair = async (
 
     return {
       status: result.status,
+      repairJobId: repairJob.id,
 
       analysisId:
         input.analysisId,
@@ -132,6 +165,7 @@ export const runAutonomousRepair = async (
 
       successfulAttempt:
         result.successfulAttempt,
+      pullRequest: result.pullRequest,
     };
   } catch (error) {
     const message =

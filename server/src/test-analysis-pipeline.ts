@@ -37,7 +37,7 @@ try {
   const result =
     await runAnalysisPipeline({
       analysisId: analysis.id,
-
+      repositoryId,
       repositoryPath,
     });
 

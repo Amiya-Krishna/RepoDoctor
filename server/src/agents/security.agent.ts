@@ -4,6 +4,7 @@ import type { SecurityDetectionResult } from "./security.types.js";
 
 import { SECURITY_DETECTION_JSON_SCHEMA } from "./security.schema.js";
 import { SECURITY_SYSTEM_PROMPT } from "../prompts/security.prompt.js";
+import { scanStaticSecurity } from "../security/static-security-scanner.js";
 
 export class SecurityAgent {
   constructor(
@@ -51,10 +52,16 @@ Do not expose complete secret values in the response.
         SECURITY_DETECTION_JSON_SCHEMA
       );
 
-    return this.validateResult(
-      result,
-      context
-    );
+    const validatedAIResult = this.validateResult(result, context);
+    const staticFindings = scanStaticSecurity(context);
+    const merged = new Map<string, SecurityDetectionResult["findings"][number]>();
+
+    for (const finding of [...validatedAIResult.findings, ...staticFindings]) {
+      const key = `${finding.filePath}:${finding.lineStart}:${finding.category}`;
+      if (!merged.has(key)) merged.set(key, finding);
+    }
+
+    return { findings: [...merged.values()] };
   }
 
   private validateResult(

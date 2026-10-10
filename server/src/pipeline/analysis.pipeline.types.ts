@@ -10,7 +10,9 @@ import type {
 
 export interface AnalysisPipelineInput {
   analysisId: string;
+  repositoryId: string;
   repositoryPath: string;
+  onProgress?: (stage: string, message: string, percent: number) => Promise<void> | void;
 }
 
 export interface AnalysisPipelineResult {

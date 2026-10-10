@@ -9,6 +9,7 @@ export type AutonomousRepairStatus =
 
 export interface AutonomousRepairResult {
   status: AutonomousRepairStatus;
+  repairJobId?: string;
 
   analysisId: string;
   findingId: string;

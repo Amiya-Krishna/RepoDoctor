@@ -26,9 +26,16 @@ import {
 
 const execFile = promisify(execFileCallback);
 
-const getGitHubRepositoryUrl = (): string => {
-  const owner = process.env.GITHUB_OWNER;
-  const repo = process.env.GITHUB_REPO;
+export interface RepairPublicationConfig {
+  owner: string;
+  repo: string;
+  token: string;
+  baseBranch: string;
+}
+
+const getGitHubRepositoryUrl = (publication?: RepairPublicationConfig): string => {
+  const owner = publication?.owner ?? process.env.GITHUB_OWNER;
+  const repo = publication?.repo ?? process.env.GITHUB_REPO;
 
   if (!owner || !repo) {
     throw new Error(
@@ -39,15 +46,12 @@ const getGitHubRepositoryUrl = (): string => {
   return `https://github.com/${owner}/${repo}.git`;
 };
 
-const getBaseBranch = (): string => {
-  return (
-    process.env.GITHUB_BASE_BRANCH ??
-    "main"
-  );
+const getBaseBranch = (publication?: RepairPublicationConfig): string => {
+  return publication?.baseBranch ?? process.env.GITHUB_BASE_BRANCH ?? "main";
 };
 
-const getGitHubPushEnvironment = (): NodeJS.ProcessEnv => {
-  const token = process.env.GITHUB_TOKEN;
+const getGitHubPushEnvironment = (tokenOverride?: string): NodeJS.ProcessEnv => {
+  const token = tokenOverride ?? process.env.GITHUB_TOKEN;
 
   if (!token) {
     throw new Error(
@@ -140,6 +144,7 @@ const validateWorkingTree = async (
 
 const validateBranch = async (
   workspace: RepairWorkspace,
+  publication?: RepairPublicationConfig,
 ): Promise<void> => {
   const { stdout } = await runGit(
     workspace.repositoryPath,
@@ -157,7 +162,7 @@ const validateBranch = async (
     );
   }
 
-  const baseBranch = getBaseBranch();
+  const baseBranch = getBaseBranch(publication);
 
   if (currentBranch === baseBranch) {
     throw new Error(
@@ -189,6 +194,9 @@ const commitRepair = async (
     );
   }
 
+  await runGit(workspace.repositoryPath, ["config", "user.name", "RepoDoctor AI"]);
+  await runGit(workspace.repositoryPath, ["config", "user.email", "repodoctor-ai@users.noreply.github.com"]);
+
   await runGit(
     workspace.repositoryPath,
     [
@@ -211,9 +219,10 @@ const commitRepair = async (
 
 const configureOrigin = async (
   workspace: RepairWorkspace,
+  publication?: RepairPublicationConfig,
 ): Promise<void> => {
   const repositoryUrl =
-    getGitHubRepositoryUrl();
+    getGitHubRepositoryUrl(publication);
 
   await runGit(
     workspace.repositoryPath,
@@ -228,9 +237,10 @@ const configureOrigin = async (
 
 const pushRepairBranch = async (
   workspace: RepairWorkspace,
+  publication?: RepairPublicationConfig,
 ): Promise<void> => {
   const env =
-    getGitHubPushEnvironment();
+    getGitHubPushEnvironment(publication?.token);
 
   await runGit(
     workspace.repositoryPath,
@@ -249,6 +259,7 @@ export const publishVerifiedRepair = async (
   verification: VerificationResult,
   title: string,
   body: string,
+  publication?: RepairPublicationConfig,
 ) => {
   validateVerifiedResult(
     verification,
@@ -256,6 +267,7 @@ export const publishVerifiedRepair = async (
 
   await validateBranch(
     workspace,
+    publication,
   );
 
   await validateWorkingTree(
@@ -264,6 +276,7 @@ export const publishVerifiedRepair = async (
 
   await configureOrigin(
     workspace,
+    publication,
   );
 
   const commitSha =
@@ -273,6 +286,7 @@ export const publishVerifiedRepair = async (
 
   await pushRepairBranch(
     workspace,
+    publication,
   );
 
   const pullRequest =
@@ -280,9 +294,12 @@ export const publishVerifiedRepair = async (
       branchName:
         workspace.branchName,
       baseBranch:
-        getBaseBranch(),
+        getBaseBranch(publication),
       title,
       body,
+      owner: publication?.owner,
+      repo: publication?.repo,
+      token: publication?.token,
     });
 
   return {
@@ -300,6 +317,7 @@ export const publishVerifiedRepairWithCleanup =
     analysisId: string,
     findingId: string,
     fixProposalId: string,
+    publication?: RepairPublicationConfig,
   ) => {
     const title =
       `fix: ${findingTitle}`;
@@ -316,13 +334,14 @@ export const publishVerifiedRepairWithCleanup =
         verification,
         title,
         body,
+        publication,
       );
 
     const owner =
-      process.env.GITHUB_OWNER;
+      publication?.owner ?? process.env.GITHUB_OWNER;
 
     const repo =
-      process.env.GITHUB_REPO;
+      publication?.repo ?? process.env.GITHUB_REPO;
 
     if (!owner || !repo) {
       throw new Error(
@@ -344,7 +363,7 @@ export const publishVerifiedRepairWithCleanup =
           workspace.branchName,
 
         baseBranch:
-          getBaseBranch(),
+          getBaseBranch(publication),
 
         commitSha:
           result.commitSha,

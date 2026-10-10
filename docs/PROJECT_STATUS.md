@@ -155,3 +155,10 @@ Analyze
 ```
 
 The default/source repository is still protected throughout the workflow.
+
+
+## Day 22–24 Reconciliation Update
+
+The current implementation now includes a BullMQ repository-scan queue and separate worker, HMAC-verified GitHub webhooks, authenticated Socket.IO progress events, job status lookup, and dashboard progress UI. Repository ingestion now invokes the unified AI analysis pipeline using the actual repository ID.
+
+These changes are present in the current working archive but remain **unverified by a build/integration test** because dependencies were not installed in this environment. Regenerate and commit both npm lockfiles with `npm install`, then run the checks in the updated README before treating these milestones as complete.

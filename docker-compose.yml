@@ -1,29 +1,112 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: repodoctor
+      POSTGRES_PASSWORD: repodoctor
+      POSTGRES_DB: repodoctor
+    ports:
+      - "5432:5432"
+    volumes:
+      - repodoctor-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U repodoctor -d repodoctor"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - repodoctor-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
 
   server:
     build:
       context: .
       dockerfile: docker/server/Dockerfile
-
     ports:
       - "5000:5000"
-
     env_file:
       - ./server/.env
-
+    environment:
+      DATABASE_URL: postgresql://repodoctor:repodoctor@postgres:5432/repodoctor?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - ./server:/app/server
       - /app/server/node_modules
+    restart: unless-stopped
 
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker/Dockerfile
+    env_file:
+      - ./server/.env
+    environment:
+      DATABASE_URL: postgresql://repodoctor:repodoctor@postgres:5432/repodoctor?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./server:/app/server
+      - /app/server/node_modules
+    restart: unless-stopped
+
+
+  repair-worker:
+    build:
+      context: .
+      dockerfile: docker/worker/Dockerfile
+    command: ["npm", "run", "repair-worker"]
+    env_file:
+      - ./server/.env
+    environment:
+      DATABASE_URL: postgresql://repodoctor:repodoctor@postgres:5432/repodoctor?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      REPAIR_WORKER_CONCURRENCY: 1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./server:/app/server
+      - /app/server/node_modules
     restart: unless-stopped
 
   analysis:
     build:
       context: .
       dockerfile: docker/analysis/Dockerfile
-
     working_dir: /workspace
-
     command: ["node", "--version"]
-
+    profiles: ["tools"]
     restart: "no"
+
+volumes:
+  repodoctor-postgres:
+  repodoctor-redis:

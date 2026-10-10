@@ -9,13 +9,29 @@ import {
 
 export const register = async (req: Request, res: Response) => {
   try {
-    const { name, email, password } = req.body;
+    const rawName = req.body?.name;
+    const rawEmail = req.body?.email;
+    const password = req.body?.password;
 
-    // Validate input
-    if (!name || !email || !password) {
+    if (
+      typeof rawName !== "string" ||
+      typeof rawEmail !== "string" ||
+      typeof password !== "string" ||
+      !rawName.trim() ||
+      !rawEmail.trim() ||
+      password.length < 8 ||
+      password.length > 128
+    ) {
       return res.status(400).json({
-        message: "Name, email and password are required",
+        message: "Name and email are required; password must be 8–128 characters",
       });
+    }
+
+    const name = rawName.trim();
+    const email = rawEmail.trim().toLowerCase();
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ message: "Enter a valid email address" });
     }
 
     // Check existing user
@@ -30,12 +46,7 @@ export const register = async (req: Request, res: Response) => {
     // Hash password
     const hashedPassword = await hashPassword(password);
 
-    console.log("Register debug:", {
-      name,
-      email,
-      passwordProvided: !!password,
-      hashCreated: !!hashedPassword,
-    });
+
 
     // Create user
     const user = await prisma.user.create({
@@ -69,9 +80,10 @@ export const register = async (req: Request, res: Response) => {
 
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, password } = req.body;
+    const rawEmail = req.body?.email;
+    const password = req.body?.password;
 
-    if (!email || !password) {
+    if (typeof rawEmail !== "string" || typeof password !== "string" || !rawEmail.trim() || !password) {
       res.status(400).json({
         success: false,
         message: "Email and password are required",
@@ -79,6 +91,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    const email = rawEmail.trim().toLowerCase();
     const user = await prisma.user.findUnique({ where: { email } });
 
     if (!user) {

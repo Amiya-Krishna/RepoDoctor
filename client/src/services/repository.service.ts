@@ -8,7 +8,7 @@ import type {
 export const getRepositories = async () => {
   const response = await api.get<{
     repositories: Repository[];
-  }>("/repositories", {
+  }>("/github/repositories", {
     headers: authHeaders(),
   });
 

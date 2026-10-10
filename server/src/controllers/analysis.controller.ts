@@ -20,11 +20,36 @@ export const getLatestAnalysis = async (req: Request, res: Response) => {
     }
 
     const analysis = await prisma.analysis.findFirst({
-      where: {
-        repositoryId,
-      },
-      orderBy: {
-        createdAt: "desc",
+      where: { repositoryId },
+      orderBy: { createdAt: "desc" },
+      include: {
+        bugFindings: {
+          select: {
+            id: true, title: true, description: true, category: true,
+            severity: true, filePath: true, lineStart: true, lineEnd: true,
+            evidence: true, suggestedFix: true, confidence: true,
+          },
+        },
+        securityFindings: {
+          select: {
+            id: true, title: true, description: true, category: true,
+            severity: true, filePath: true, lineStart: true, lineEnd: true,
+            evidence: true, suggestedFix: true, confidence: true,
+          },
+        },
+        generatedTests: {
+          select: {
+            id: true, title: true, description: true, type: true,
+            filePath: true, targetFunction: true, testCode: true,
+            rationale: true, confidence: true,
+          },
+        },
+        riskAssessments: {
+          select: {
+            id: true, findingId: true, source: true, score: true,
+            level: true, priority: true, factors: true,
+          },
+        },
       },
     });
 

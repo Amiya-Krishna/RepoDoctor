@@ -49,3 +49,29 @@ export const getRepository = async (req: Request, res: Response) => {
     });
   }
 };
+
+
+export const deleteRepository = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user.userId as string;
+    const repositoryId = req.params.repositoryId as string;
+
+    const result = await prisma.repository.deleteMany({
+      where: { id: repositoryId, userId },
+    });
+
+    if (result.count === 0) {
+      return res.status(404).json({ message: "Repository not found" });
+    }
+
+    return res.status(204).send();
+  } catch (error: any) {
+    if (error?.code === "P2003") {
+      return res.status(409).json({
+        message: "Repository cannot be deleted while related repair records still exist",
+      });
+    }
+    console.error("Delete repository failed", error);
+    return res.status(500).json({ message: "Failed to delete repository" });
+  }
+};

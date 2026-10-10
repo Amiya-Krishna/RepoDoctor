@@ -195,3 +195,42 @@ Finding
 - Workspace cleanup uses `removeRepairWorkspace(workspace.rootPath)`.
 - Retry maximum is 3 attempts.
 - Replanning applies only to retry attempts.
+
+
+## Day 22 — BullMQ scan queue (implemented in current working archive)
+
+- Added a BullMQ `repository-scan` queue with bounded exponential retries and retained job history.
+- Added `server/src/workers/scan.worker.ts` as a separate worker process.
+- Repository scans are now queued by the API and the endpoint returns `202 Accepted` with a job ID.
+- Added a job-status endpoint scoped to the authenticated user's jobs.
+- Added PostgreSQL and Redis services to Compose. PostgreSQL remains the authoritative database; Redis is for queue state.
+- Added progress callbacks to the unified analysis pipeline.
+- **Important integration correction:** repository ingestion now calls `runAnalysisPipeline()` while the cloned repository workspace still exists. The pipeline now receives the actual `repositoryId` rather than incorrectly using `analysisId` as the context repository ID.
+
+## Day 23 — GitHub webhooks (implemented in current working archive)
+
+- Added `POST /api/github/webhook`.
+- Captures the raw JSON request body and validates `X-Hub-Signature-256` using constant-time comparison.
+- Handles `push` and selected `pull_request` actions, enqueues scans, and uses the GitHub delivery ID as a queue job ID for deduplication.
+- Fork pull requests are deliberately ignored; they need a separate trust and token-permission policy.
+
+## Day 24 — Authenticated live progress (implemented in current working archive)
+
+- Added Socket.IO server authentication using the existing JWT.
+- Added QueueEvents-to-Socket.IO event forwarding for scan progress, completion, and failure.
+- Updated the repository dashboard to show scan progress and analysis status.
+- Added a job-status polling endpoint as a recovery path when a client misses a live event.
+- Hardened GitHub OAuth state with a signed expiring JWT bound to an HttpOnly cookie.
+- Connected the existing analysis overview/history components to the dashboard and exposed findings/test proposals in the latest-analysis response.
+
+## Validation status
+
+The uploaded archive did not contain `node_modules`, and dependency installation could not complete in the execution environment. Therefore, TypeScript builds, Prisma integration tests, Redis/BullMQ processing, Socket.IO delivery, and the GitHub webhook round trip still need to be run in the user's environment after regenerating the package lock files with `npm install`. No passing test result is claimed here.
+
+
+### Day 11 reconciliation — selected deterministic security checks
+
+- Added `src/security/static-security-scanner.ts`.
+- It supplements AI security findings with heuristic checks for hardcoded credential-like literals (evidence is redacted), dynamic `eval`/`Function`, selected command/query construction, user-controlled filesystem paths, and wildcard CORS.
+- Added `src/test-static-security-scanner.ts`.
+- This is a first deterministic layer, not a replacement for a dedicated SAST tool or `npm audit`; authentication/authorization analysis and dependency auditing remain incomplete.

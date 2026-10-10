@@ -12,6 +12,7 @@ export interface CreatePullRequestInput {
   title: string;
   body: string;
   draft?: boolean;
+  token?: string;
 }
 
 export interface GitHubPullRequest {
