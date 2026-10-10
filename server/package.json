@@ -37,7 +37,9 @@
     "test:repair-queue": "tsx src/test-repair-queue.ts",
     "test:webhook-signature": "tsx src/test-github-webhook-signature.ts",
     "test:static-security": "tsx src/test-static-security-scanner.ts",
-    "test:rag": "tsx src/test-rag.ts"
+    "test:rag": "tsx src/test-rag.ts",
+    "test:benchmark": "tsx src/test-benchmark-evaluator.ts",
+    "benchmark:evaluate": "tsx src/benchmark/run-benchmark.ts"
   },
   "keywords": [],
   "author": "",

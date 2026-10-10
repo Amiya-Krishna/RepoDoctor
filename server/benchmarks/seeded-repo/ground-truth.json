@@ -1,0 +1,36 @@
+{
+  "datasetName": "RepoDoctor JS-TS Seeded Defects",
+  "version": "1.0.0",
+  "findings": [
+    {
+      "id": "BUG-001",
+      "filePath": "src/user.ts",
+      "category": "null_handling",
+      "severity": "HIGH"
+    },
+    {
+      "id": "SEC-001",
+      "filePath": "src/admin.ts",
+      "category": "authorization",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "SEC-002",
+      "filePath": "src/parse.ts",
+      "category": "code_injection",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "BUG-002",
+      "filePath": "src/profile.ts",
+      "category": "input_validation",
+      "severity": "MEDIUM"
+    },
+    {
+      "id": "BUG-003",
+      "filePath": "src/payment.ts",
+      "category": "async_error_handling",
+      "severity": "HIGH"
+    }
+  ]
+}
