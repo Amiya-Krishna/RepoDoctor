@@ -1,112 +1,117 @@
+
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: repodoctor
-      POSTGRES_PASSWORD: repodoctor
       POSTGRES_DB: repodoctor
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: repodoctor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     volumes:
-      - repodoctor-postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U repodoctor -d repodoctor"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-    restart: unless-stopped
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+  
+  migrate:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+      target: build
+    env_file:
+      - ./server/.env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://repodoctor:${POSTGRES_PASSWORD}@postgres:5432/repodoctor
+    command: ["npx", "prisma", "migrate", "deploy"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "6379:6379"
-    volumes:
-      - repodoctor-redis:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
     restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD}"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
 
   server:
     build:
-      context: .
-      dockerfile: docker/server/Dockerfile
-    ports:
-      - "5000:5000"
+      context: ./server
+      dockerfile: Dockerfile
+    restart: unless-stopped
     env_file:
       - ./server/.env
     environment:
-      DATABASE_URL: postgresql://repodoctor:repodoctor@postgres:5432/repodoctor?schema=public
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      NODE_ENV: production
+      DATABASE_URL: postgresql://repodoctor:${POSTGRES_PASSWORD}@postgres:5432/repodoctor
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./server:/app/server
-      - /app/server/node_modules
-    restart: unless-stopped
+    expose:
+      - "4000"
+    networks:
+      - backend
+      - frontend
 
   worker:
     build:
-      context: .
-      dockerfile: docker/worker/Dockerfile
+      context: ./server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["node", "dist/workers/repair.worker.js"]
     env_file:
       - ./server/.env
     environment:
-      DATABASE_URL: postgresql://repodoctor:repodoctor@postgres:5432/repodoctor?schema=public
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      NODE_ENV: production
+      DATABASE_URL: postgresql://repodoctor:${POSTGRES_PASSWORD}@postgres:5432/repodoctor
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./server:/app/server
-      - /app/server/node_modules
-    restart: unless-stopped
+    networks:
+      - backend
 
-
-  repair-worker:
+  client:
     build:
-      context: .
-      dockerfile: docker/worker/Dockerfile
-    command: ["npm", "run", "repair-worker"]
-    env_file:
-      - ./server/.env
-    environment:
-      DATABASE_URL: postgresql://repodoctor:repodoctor@postgres:5432/repodoctor?schema=public
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
-      REPAIR_WORKER_CONCURRENCY: 1
+      context: ./client
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:80"
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./server:/app/server
-      - /app/server/node_modules
-    restart: unless-stopped
-
-  analysis:
-    build:
-      context: .
-      dockerfile: docker/analysis/Dockerfile
-    working_dir: /workspace
-    command: ["node", "--version"]
-    profiles: ["tools"]
-    restart: "no"
+      - server
+    networks:
+      - frontend
 
 volumes:
-  repodoctor-postgres:
-  repodoctor-redis:
+  postgres_data:
+  redis_data:
+
+networks:
+  frontend:
+  backend:
+    internal: true
