@@ -1,22 +1,4 @@
-
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: repodoctor
-      POSTGRES_USER: repodoctor
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U repodoctor -d repodoctor"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - backend
-  
   migrate:
     build:
       context: ./server
@@ -26,19 +8,16 @@ services:
       - ./server/.env
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://repodoctor:${POSTGRES_PASSWORD}@postgres:5432/repodoctor
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in root .env}
     command: ["npx", "prisma", "migrate", "deploy"]
     restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
     networks:
       - backend
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD}"]
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in root .env}"]
     volumes:
       - redis_data:/data
     healthcheck:
@@ -58,13 +37,11 @@ services:
       - ./server/.env
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://repodoctor:${POSTGRES_PASSWORD}@postgres:5432/repodoctor
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in root .env}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
     depends_on:
       migrate:
         condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     expose:
@@ -83,13 +60,11 @@ services:
       - ./server/.env
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://repodoctor:${POSTGRES_PASSWORD}@postgres:5432/repodoctor
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in root .env}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
     depends_on:
       migrate:
         condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     networks:
@@ -108,10 +83,9 @@ services:
       - frontend
 
 volumes:
-  postgres_data:
   redis_data:
 
 networks:
   frontend:
   backend:
-    internal: true
+    internal: false
