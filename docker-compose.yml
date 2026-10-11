@@ -1,3 +1,18 @@
+# RepoDoctor deployment. Requires in the shell or a root .env file:
+#   DATABASE_URL    PostgreSQL connection string reachable from the containers
+#   REDIS_PASSWORD  password for the bundled Redis
+# and a filled-in server/.env (copy server/.env.example).
+#
+# Not included: the repair worker runs repository tests in Docker, which needs
+# access to a Docker daemon. This file deliberately does NOT mount the host
+# Docker socket (that grants root on the host); see docs/OPERATIONS_SECURITY.md.
+x-server-env: &server-env
+  NODE_ENV: production
+  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in root .env}
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in root .env}
+
 services:
   migrate:
     build:
@@ -21,10 +36,12 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     networks:
       - backend
 
@@ -36,9 +53,9 @@ services:
     env_file:
       - ./server/.env
     environment:
-      NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in root .env}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      <<: *server-env
+      PORT: "4000"
+      TRUST_PROXY: "1"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -46,11 +63,35 @@ services:
         condition: service_healthy
     expose:
       - "4000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - backend
       - frontend
 
-  worker:
+  scan-worker:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["node", "dist/workers/scan.worker.js"]
+    env_file:
+      - ./server/.env
+    environment:
+      <<: *server-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+
+  repair-worker:
     build:
       context: ./server
       dockerfile: Dockerfile
@@ -59,9 +100,7 @@ services:
     env_file:
       - ./server/.env
     environment:
-      NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in root .env}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      <<: *server-env
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -78,7 +117,8 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     networks:
       - frontend
 
@@ -88,4 +128,3 @@ volumes:
 networks:
   frontend:
   backend:
-    internal: false

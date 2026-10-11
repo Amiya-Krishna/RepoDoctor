@@ -12,6 +12,7 @@ import {
 } from "../queue/repair.queue.js";
 import { redisConnection, closeScanQueue } from "../queue/scan.queue.js";
 import { createWorkspace, removeWorkspace } from "../services/workspace.service.js";
+import { revealToken } from "../security/token-encryption.js";
 import { runAutonomousRepair } from "../services/autonomous-repair.service.js";
 import type { BugFinding, BugCategory, BugSeverity } from "../agents/bug-detection.types.js";
 import type { SecurityFinding, SecurityCategory, SecuritySeverity } from "../agents/security.types.js";
@@ -113,6 +114,7 @@ const start = async () => {
         select: { githubAccessToken: true },
       });
       if (!user?.githubAccessToken) throw new Error("GitHub connection is missing or expired");
+      const githubAccessToken = revealToken(user.githubAccessToken);
 
       const finding = await loadFinding(analysisId, findingId);
       const sourceWorkspace = await createWorkspace();
@@ -132,7 +134,7 @@ const start = async () => {
             sourceRepositoryPath,
           ],
           {
-            env: cloneEnvironment(user.githubAccessToken),
+            env: cloneEnvironment(githubAccessToken),
             timeout: 120_000,
             maxBuffer: 10 * 1024 * 1024,
           },
@@ -150,7 +152,7 @@ const start = async () => {
           publication: {
             owner: analysis.repository.ownerLogin,
             repo: analysis.repository.name,
-            token: user.githubAccessToken,
+            token: githubAccessToken,
             baseBranch: analysis.repository.defaultBranch,
           },
           onProgress: progress,

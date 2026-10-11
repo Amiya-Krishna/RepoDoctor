@@ -21,7 +21,7 @@ Names are taken from the code and `server/.env.example`. Copy `server/.env.examp
 | `DATABASE_URL` | yes | Prisma datasource | PostgreSQL URL |
 | `PORT` | yes (5000) | `server.ts` | default 5000 (Compose/nginx expect 4000) |
 | `JWT_SECRET` | yes | auth, OAuth state, sockets | server refuses to start without it |
-| `JWT_EXPIRES_IN` | yes | **nothing** | token lifetime is hard-coded to `1d` |
+| `JWT_EXPIRES_IN` | no (default `1d`) | `services/auth.service.ts` | digits + `s`/`m`/`h`/`d`; invalid values fall back to `1d` (read since the third pass) |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL` | yes | `services/github.service.ts` | OAuth |
 | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | yes | `ai/ai.config.ts` | key **required**; import throws if empty |
 | `GROQ_API_KEY`, `GROQ_MODEL`, `GEMINI_API_KEY`, `GEMINI_MODEL` | yes | `ai/ai.config.ts` | `.env.example` contains placeholder `...` values for Gemini |
@@ -65,16 +65,16 @@ Do not run `prisma migrate reset` against data that must be kept. Before applyin
 | Authorization by ownership | controllers | Implemented, not yet verified | queries filter by `userId` through `Repository`; no cross-user tests exist |
 | OAuth CSRF state | `github.controller.ts` | Implemented, not yet verified | signed JWT, 10 min, HttpOnly cookie match |
 | Webhook HMAC | `github/github-webhook.signature.ts` | **Implemented and verified (unit)** | `npm run test:webhook-signature` passed on 11 Oct 2026 |
-| API rate limiting | `middleware/rate-limit.middleware.ts`, `app.ts` | Implemented, not yet verified | `express-rate-limit` was missing from the manifest and was declared on 11 Oct 2026 (build not run); in-memory store; no `trust proxy` (behind nginx all clients share one key) |
-| GitHub token encryption at rest | `security/token-encryption.ts` | Partially implemented | AES-256-GCM works in `npm run test:security`; `github.controller.ts` stores the raw token; no reader decrypts |
+| API rate limiting | `middleware/rate-limit.middleware.ts`, `app.ts` | Implemented (loads in `npm run test:app`) | in-memory store; set `TRUST_PROXY=1` behind a reverse proxy (Compose does) |
+| GitHub token encryption at rest | `security/token-encryption.ts` | Implemented (unit verified), opt-in | AES-256-GCM; since audit 2 the OAuth callback stores `protectToken(token)` and the controllers/workers read with `revealToken`. Encrypts only when `GITHUB_TOKEN_ENCRYPTION_KEY` is set; legacy plaintext values still read. Not verified against a live database |
 | Token kept out of containers | repair worker, runner | Implemented, not yet verified | Docker receives only `REPO_DOCTOR_ATTEMPT` |
 | Token kept out of URLs/args | ingestion, worker, PR service | Implemented, not yet verified | passed via `GIT_CONFIG_*` environment |
 | Sandboxed test execution | `execution/docker.runner.ts` | Implemented, not yet verified | `--network none`, 512 MB, 1 CPU, 128 PIDs, `--cap-drop ALL`, `no-new-privileges`, read-only root, `noexec` tmpfs, 120 s timeout; workspace bind-mounted read-write; no `--user`; no seccomp/AppArmor profile specified |
 | Command allow-listing | `controllers/repair.controller.ts` | Partially implemented | first argv must be `node`/`npm`/`npx`/`pnpm`/`yarn`, arrays only, ≤ 20 parts; `node -e` and `npx <pkg>` are allowed. `security/test-command-policy.ts` is stricter but unused |
 | Patch validation | `repair/repair.patch.ts` | Implemented, not yet verified | rejects absolute, `..`, escaping paths; checks ranges and original code; no symlink check, no size/file-count cap |
 | Bounded retries | `retry.policy.ts` | Implemented, not yet verified | 3 attempts; queue-level attempts 1 |
-| Verification gate | `pull-request.service.ts` | Partially implemented | model verdict plus `testPassed`, no regression, confidence ≥ 0.7; Docker exit code is **not** independently enforced |
-| Prompt-injection handling | `rag` formatter; `security/untrusted-context.ts` | Partially implemented | retrieved memory carries a warning; the wrapper is unused and contains literal `$DIL1`/`$DIL2` text |
+| Verification gate | `services/verification-gate.ts`, `pull-request.service.ts` | Implemented and verified (unit) | model verdict plus `testPassed`, no regression, confidence ≥ 0.7; since audit 2 a `VERIFIED` verdict is downgraded unless the Docker run exited 0 without timing out (`npm run test:verification-gate`) |
+| Prompt-injection handling | `rag` formatter; `security/untrusted-context.ts` | Partially implemented | retrieved memory carries a warning; the wrapper is still unused, but its leftover literal `$DIL1`/`$DIL2` delimiters were replaced by a per-call random nonce (audit 2) |
 | Static secret/SAST checks | `security/static-security-scanner.ts` | **Implemented and verified (unit)** | six regex rules; not a SAST replacement |
 | Audit logging | `SecurityAuditEvent` table | Planned / not implemented | table and migration only; `security-audit.service.ts` is empty; console logging only |
 | Secret redaction in memory | `rag/chunker.ts` | Implemented, not yet verified | regex redaction before indexing |
@@ -107,21 +107,25 @@ The user's own working copy is never involved; the "source" is always a fresh cl
 
 ## 6. Docker Compose reality check
 
-The previous documentation said Compose had hard-coded credentials and published database/cache ports. **That is no longer true.** The current file requires `POSTGRES_PASSWORD` and `REDIS_PASSWORD`, uses an `internal: true` backend network, publishes only the client on host port 8080, adds health checks for PostgreSQL and Redis, and runs a one-shot `migrate` service.
+The current file contains **no PostgreSQL service**: it requires `DATABASE_URL` (an external database) and `REDIS_PASSWORD`, publishes only the client on host port 8080, health-checks Redis and the API, and runs a one-shot `migrate` service (`prisma migrate deploy`). Older text that mentions `POSTGRES_PASSWORD`, an `internal: true` network or a PostgreSQL health check describes a previous version of the file.
 
-It would still not produce a working stack. Defects found by reading the files (nothing was built or started):
+The stack has **not been built or started** (no Docker daemon in the verification sandbox). Defects found by reading the files:
 
 | # | Defect | Where |
 |---|---|---|
 | 1 | **Fixed 11 Oct 2026:** command was `node dist/index.js` (nonexistent) and the file repeated itself; now de-duplicated, runs `dist/server.js`. Also fixed: production `npm ci` now uses `--ignore-scripts` (it would have run `prisma generate` before `prisma/` was copied); untested, no image built. | `server/Dockerfile` |
-| 2 | `PORT` defaults to 5000 but Compose `expose`s and nginx proxies to 4000. Set `PORT=4000` in `server/.env`. | `docker-compose.yml`, `client/nginx.conf` |
-| 3 | `REDIS_URL` is set, but the code reads `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`; `.env.example` has `REDIS_HOST=127.0.0.1`. Set `REDIS_HOST=redis`. | `docker-compose.yml`, `queue/scan.queue.ts` |
-| 4 | No scan-worker service. The service named `worker` runs `repair.worker.js`, so queued scans and webhook scans are never processed. Documentation that referenced a `repair-worker` service was wrong. | `docker-compose.yml` |
-| 5 | `worker` is only on the internal `backend` network and cannot reach GitHub or AI providers. | `docker-compose.yml` |
-| 6 | The runtime image has no `git`, and no Docker CLI or daemon access is provided, but both workers need git and the repair worker needs Docker. | `server/Dockerfile` |
+| 2 | **Fixed (audit 2):** Compose now sets `PORT=4000` for the server (matches `expose` and nginx). | `docker-compose.yml` |
+| 3 | **Fixed (audit 2):** Compose sets `REDIS_HOST=redis`, `REDIS_PORT` and `REDIS_PASSWORD` (the code never read `REDIS_URL`). | `docker-compose.yml` |
+| 4 | **Fixed (audit 2):** added a `scan-worker` service; the repair worker is now named `repair-worker`. | `docker-compose.yml` |
+| 5 | **Fixed (audit 2):** the `backend` network is no longer internal-only, so workers can reach GitHub and AI providers. | `docker-compose.yml` |
+| 6 | **Partly fixed (audit 2):** the runtime image now installs `git`. The repair worker still needs a Docker daemon; none is provided and the host socket is intentionally not mounted. Run the repair worker where Docker is available, or accept that repair jobs fail there. The build stage's `npm ci` now uses `--ignore-scripts` (its postinstall `prisma generate` ran before `prisma/` was copied). | `server/Dockerfile` |
 | 7 | **Fixed 11 Oct 2026:** `express-rate-limit` added to the manifest and lockfile. | `server/package.json` |
-| 8 | No health checks for `server`, `worker`, `client`; the nginx image has no TLS. | all |
+| 8 | **Partly fixed (audit 2):** `server` has a health check and `client` waits for it. Workers have none; the nginx image has no TLS. | all |
 | 9 | **Removed 11 Oct 2026:** the unreferenced `docker/` directory (older dev Dockerfiles). | `docker/` |
+| 10 | **Fixed (third pass):** `client/nginx.conf` proxied only `/api/`, so Socket.IO (`/socket.io/`) got `index.html` and live progress never connected in the Compose stack. Added a `/socket.io/` location with WebSocket upgrade headers. Verified by running the real nginx in front of the real API: websocket and polling connect, a bad token is rejected, and the old file fails both. | `client/nginx.conf` |
+| 11 | **Fixed, not image-built (third pass):** the server build stage (`node:22-bookworm-slim`) had no `openssl`, which Prisma uses to pick the engine platform; it is now installed so the generated client matches the runtime image. | `server/Dockerfile` |
+| 12 | **Open:** the runtime image contains no `docker` CLI, so the Compose `repair-worker` can only end `INCONCLUSIVE` (spawn error, no exit code). Run it where Docker is installed, or build an image that adds the CLI and a daemon connection. | `docker-compose.yml`, `server/Dockerfile` |
+| 13 | **Not verified:** behaviour when a running job is cut off by `SIGKILL` (Compose waits only 10 s after `SIGTERM`; workers wait for the active job to finish before exiting). Idle shutdown was measured (exit 0 in under 1 s for the API and both workers). The scan pipeline clears earlier partial results when re-run; repair-job re-run behaviour was not tested. Consider `stop_grace_period` for the workers. | `docker-compose.yml` |
 
 The client Docker build (`client/Dockerfile`) and its nginx proxy look plausible but were not built.
 

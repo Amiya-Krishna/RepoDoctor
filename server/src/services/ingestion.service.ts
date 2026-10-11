@@ -73,6 +73,12 @@ export const ingestRepository = async ({
       analysisId: analysis.id,
       repositoryId,
       repositoryPath,
+      metadata: {
+        projectType: snapshot.projectType,
+        language: snapshot.language,
+        framework: snapshot.framework ?? undefined,
+        packageManager: snapshot.packageManager,
+      },
       onProgress,
     });
 

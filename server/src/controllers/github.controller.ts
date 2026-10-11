@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../config/prisma.js";
+import { protectToken, revealToken } from "../security/token-encryption.js";
 import {
   exchangeCodeForToken,
   getGitHubAuthUrl,
@@ -100,7 +101,7 @@ export const githubCallback = async (req: Request, res: Response) => {
       data: {
         githubId: String(githubUser.id),
         githubUsername: githubUser.login,
-        githubAccessToken: accessToken,
+        githubAccessToken: protectToken(accessToken),
       },
     });
 
@@ -140,7 +141,7 @@ export const getRepositories = async (req: Request, res: Response) => {
     }
 
     const githubRepositories = await getGitHubRepositories(
-      user.githubAccessToken,
+      revealToken(user.githubAccessToken),
     );
 
     for (const repo of githubRepositories) {

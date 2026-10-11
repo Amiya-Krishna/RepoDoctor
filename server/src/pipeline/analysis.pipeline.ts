@@ -57,11 +57,13 @@ export const runAnalysisPipeline = async (
     analysisId,
     repositoryId,
     repositoryPath,
+    metadata,
     onProgress,
   } = input;
 
   try {
     await markAnalysisRunning(analysisId);
+    await clearPreviousResults(analysisId);
     await onProgress?.("context", "Building repository context", 20);
 
     // ========================================
@@ -72,6 +74,7 @@ export const runAnalysisPipeline = async (
     const context = await buildRepositoryContext(
       repositoryPath,
       repositoryId,
+      metadata,
     );
 
     let formattedContext = formatRepositoryContext(context);
@@ -215,6 +218,8 @@ export const runAnalysisPipeline = async (
         error
       );
     }
+    await saveGeneratedTests(analysisId, testResult);
+
     // ========================================
     // STAGE 6: BUILD RISK INPUT
     // ========================================
@@ -269,10 +274,7 @@ export const runAnalysisPipeline = async (
     // STAGE 9: COMPLETE ANALYSIS
     // ========================================
 
-    await markAnalysisCompleted(
-      analysisId,
-      context
-    );
+    await markAnalysisCompleted(analysisId);
     await onProgress?.("completed", "Repository analysis completed", 100);
 
     return {
@@ -323,14 +325,10 @@ const markAnalysisRunning = async (
   });
 };
 
+// The analyzer snapshot (projectType, language, framework, ...) is stored by
+// saveAnalysis() before the pipeline runs, so completion must not overwrite it.
 const markAnalysisCompleted = async (
-  analysisId: string,
-  context: {
-    projectType?: string;
-    language?: string;
-    packageManager?: string;
-    framework?: string;
-  }
+  analysisId: string
 ): Promise<void> => {
   await prisma.analysis.update({
     where: {
@@ -341,20 +339,22 @@ const markAnalysisCompleted = async (
       status: "COMPLETED",
 
       completedAt: new Date(),
-
-      projectType:
-        context.projectType ?? null,
-
-      language:
-        context.language ?? null,
-
-      packageManager:
-        context.packageManager ?? null,
-
-      framework:
-        context.framework ?? null,
     },
   });
+};
+
+// A queue retry re-runs the pipeline against the same analysis row. Remove the
+// results of any earlier partial run so findings, tests and risk assessments
+// are not duplicated.
+const clearPreviousResults = async (
+  analysisId: string
+): Promise<void> => {
+  await prisma.$transaction([
+    prisma.riskAssessment.deleteMany({ where: { analysisId } }),
+    prisma.generatedTest.deleteMany({ where: { analysisId } }),
+    prisma.securityFinding.deleteMany({ where: { analysisId } }),
+    prisma.bugFinding.deleteMany({ where: { analysisId } }),
+  ]);
 };
 
 const markAnalysisFailed = async (

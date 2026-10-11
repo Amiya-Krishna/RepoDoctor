@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
-import { api } from "../lib/api";
+import { api, getErrorMessage } from "../lib/api";
 import { authHeaders } from "../lib/auth";
 import {
   getLatestAnalysis,
@@ -149,8 +149,8 @@ function RepositoryAnalysis({
           message: `Repair queued (job ${response.data.jobId})`,
         },
       }));
-    } catch (error: any) {
-      const message = error.response?.data?.message ?? "Unable to queue repair";
+    } catch (error) {
+      const message = getErrorMessage(error, "Unable to queue repair");
       setRepairError(message);
       setRepairStates((current) => ({
         ...current,

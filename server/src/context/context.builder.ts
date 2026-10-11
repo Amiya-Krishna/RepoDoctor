@@ -8,7 +8,6 @@ import type { ContextFile, RepositoryContext } from "./context.types.js";
 
 const MAX_FILE_SIZE = 50 * 1024;
 const MAX_FILES = 30;
-const MAX_CONTEXT_SIZE = 500_000;
 
 export const limitContextSize = (
   context: string,
@@ -37,17 +36,6 @@ const getLanguage = (filePath: string) => {
       return "unknown";
   }
 };
-
-const importantFiles = new Set([
-  "package.json",
-  "tsconfig.json",
-  "eslint.config.js",
-  "eslint.config.mjs",
-  "eslint.config.ts",
-  "vite.config.ts",
-  "next.config.js",
-  "next.config.ts",
-]);
 
 const collectSourceFiles = async (
   directory: string,

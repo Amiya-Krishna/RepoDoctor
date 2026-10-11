@@ -4,7 +4,15 @@
 
 RepoDoctor AI is a student portfolio project. It connects to a user's GitHub repositories, builds a repository snapshot and context, runs AI-assisted bug and security analysis with a deterministic risk score, and can attempt a repair: generate a patch, apply it in a disposable workspace, run tests in a network-less Docker container, ask a verification step to judge the evidence, retry up to three times, and open a GitHub pull request **only if verification succeeds**. It never merges pull requests.
 
-> **Honest status (audit of 11 October 2026).** The source tree contains an implementation for every stage of the flow. Very little has been *executed*: five dependency-free scripts pass (risk engine, webhook signature, static security scanner, benchmark evaluator, security-control modules). There has been **no clean build, migration, queue run, Docker run, live AI/GitHub call or end-to-end demonstration**, and **no measured benchmark**. The audit also found defects that would stop the supplied Docker Compose stack and the server build from working as configured. See [Known limitations](#known-limitations).
+**Project status:** The implementation includes the main stages of the RepoDoctor workflow, with fixes for authentication middleware ordering, analysis pipeline persistence and retry handling, AI provider configuration, verification-gate enforcement, GitHub token encryption, and Docker/Compose configuration.
+
+Additional fixes address Socket.IO proxying, OpenSSL availability in the server build stage, JWT expiry configuration, stale environment templates, client lint issues, and confirmed unused code. Regression tests and manual testing instructions have also been added or updated.
+
+See [MANUAL_TESTING_GUIDE.md](MANUAL_TESTING_GUIDE.md) for setup instructions, commands, and steps to test the application.
+
+**Verification limitations:** Client lint, type checking, and build checks pass. The available server test scripts and Docker Compose configuration validation also pass. However, the real Prisma Client generation and server build, Docker image builds, and live Docker integration remain unverified because of environment limitations. Database-backed application flows, live AI and GitHub integrations, and full end-to-end behavior still require verification in a properly configured environment.
+
+The project should not be considered production-ready until the remaining integration and deployment checks have been completed.
 
 ## Contents
 
@@ -100,9 +108,10 @@ Node.js 22, npm, Git, Docker (daemon reachable by the repair worker), PostgreSQL
 
 Copy `server/.env.example` to `server/.env` and fill in real values locally. Names and notes are in [Operations §2.2](docs/OPERATIONS_SECURITY.md#22-server-environment-variables). Points that commonly trip people up:
 
-- `JWT_EXPIRES_IN` is documented in `.env.example` but not read; tokens last one day.
+- `JWT_EXPIRES_IN` (digits + `s`/`m`/`h`/`d`, e.g. `12h`) sets the login-token lifetime since the third pass; an invalid or missing value falls back to `1d`.
 - Redis settings are `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD` (not a URL).
-- `GITHUB_TOKEN_ENCRYPTION_KEY` is accepted but tokens are currently stored unencrypted.
+- Set `GITHUB_TOKEN_ENCRYPTION_KEY` (base64, 32 bytes: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`) to store GitHub tokens encrypted. Without it they are stored as plain text and a warning is logged.
+- Set `TRUST_PROXY=1` when running behind a reverse proxy so rate limiting sees client IPs.
 - The client reads `VITE_API_URL` (default `http://localhost:5000/api`).
 
 ### Install, migrate, run (outside Docker)
@@ -126,7 +135,7 @@ Note: `express-rate-limit` (`^8.7.1`) was missing from `server/package.json` and
 
 ### Docker Compose
 
-`docker-compose.yml` needs `POSTGRES_PASSWORD` and `REDIS_PASSWORD` in the environment and publishes only the client on port 8080. **As written it would not produce a working stack** (wrong container entry point, port and Redis-variable mismatches, no scan worker, an internal-only worker network, no `git` in the image). The full list is in [Operations §6](docs/OPERATIONS_SECURITY.md#6-docker-compose-reality-check). Do not run it exposed to the internet.
+`docker-compose.yml` needs `DATABASE_URL` (an external PostgreSQL) and `REDIS_PASSWORD` in the environment or a root `.env` (template: `.env.example` in the project root), plus a filled-in `server/.env`, and publishes only the client on port 8080. The entry point, port, Redis variables, scan worker, `git` in the image and a server health check were fixed in the second audit and `docker compose config` validates, but **the images have not been built or run**. The repair worker still needs access to a Docker daemon, which Compose deliberately does not provide (mounting the host socket is root-equivalent). Details in [Operations §6](docs/OPERATIONS_SECURITY.md#6-docker-compose-reality-check). Do not run it exposed to the internet.
 
 ## Running checks
 
@@ -147,7 +156,7 @@ Everything else (builds, lint, Prisma validation, queue, database, Docker, AI an
 
 By design: fixes are applied only in disposable workspaces; repository tests run only in Docker with no network, dropped capabilities, resource limits and a 120-second timeout; the GitHub token is passed to git through environment variables, never into the container or URLs; retries are bounded to three; `INCONCLUSIVE` stops the loop; publication requires a verified result and never force-pushes, pushes the default branch or merges; webhooks require a valid HMAC; repository text, test output and model output are treated as untrusted.
 
-Gaps (see [Operations §3](docs/OPERATIONS_SECURITY.md#3-security-control-status)): the verification verdict comes from an LLM and the Docker exit code is not separately enforced; GitHub tokens are stored in plain text; rate limiting is unusable until its dependency is declared; the strict command policy, untrusted-context wrapper and audit logging are not connected; no cross-user authorization tests exist.
+Gaps (see [Operations §3](docs/OPERATIONS_SECURITY.md#3-security-control-status)): the verification verdict still comes from an LLM, but a `VERIFIED` verdict is now downgraded unless the Docker run exited 0 without timing out; GitHub tokens are encrypted only when `GITHUB_TOKEN_ENCRYPTION_KEY` is set (legacy plaintext values remain readable until users reconnect); the strict command policy, untrusted-context wrapper and audit logging are not connected; no cross-user authorization tests exist.
 
 ## Benchmark
 
@@ -160,12 +169,11 @@ None. No screenshots, recording or demo URL exist; the images under `client/src/
 ## Known limitations
 
 - Nothing has been built or run end to end; see the status banner.
-- Compose lacks a scan worker and cannot reach external services from the worker; ports and Redis variables disagree between Compose and the code.
-- Generated tests are produced but never saved (the pipeline imports the save function and never calls it) and are never executed.
-- The pipeline can overwrite the analyzer's `projectType`, `language`, `framework` and `packageManager` with null after analysis.
+- Compose images have not been built, and the repair worker has no Docker daemon in Compose (see Setup).
+- Generated tests are now saved with the analysis (fixed) but are never executed.
 - Test execution has no network and the clone has no `node_modules`, so repositories whose tests need installed packages will fail or be inconclusive; test commands are supplied by the caller, not detected.
 - Context selection is the first 30 JS/TS files, not finding-relevant files; repository memory is lexical, rebuilt on every scan and not filtered by branch.
-- The AI configuration requires an OpenRouter key even when other providers are configured.
+- At least one AI provider key is required; providers without a key are skipped (fixed).
 - Static security rules are line-based heuristics, not SAST or dependency auditing.
 - Fork pull requests from webhooks are intentionally ignored.
 - There is no Git history in the archive, no CI configuration, and no repository licence file (`server/package.json` says ISC).
@@ -177,8 +185,8 @@ None. No screenshots, recording or demo URL exist; the images under `client/src/
 3. [Operations and security](docs/OPERATIONS_SECURITY.md) — environment variables, control status table, Compose defects, blockers.
 4. [Testing, evaluation and demo](docs/TESTING_EVALUATION_DEMO.md) — observed results, script inventory, benchmark method, demo protocol, release checklist.
 5. [Client notes](client/README.md) — frontend specifics.
-6. [Server notes](server/README.md) — backend scripts, API, layout and blockers.
 6. [Server notes](server/README.md) — backend layout, setup, API, scripts.
+7. [Manual testing guide](MANUAL_TESTING_GUIDE.md)
 
 ## Roadmap
 

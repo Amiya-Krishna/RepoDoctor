@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { api } from "./lib/api";
+import { api, getErrorMessage } from "./lib/api";
 import Repositories from "./pages/Repositories";
 
 function App() {
@@ -27,8 +27,8 @@ function App() {
       localStorage.setItem("token", token);
       setLoggedIn(true);
       setMessage(isRegister ? "Account created successfully" : "Login successful");
-    } catch (error: any) {
-      setMessage(error.response?.data?.message ?? error.message ?? "Authentication failed");
+    } catch (error) {
+      setMessage(getErrorMessage(error, "Authentication failed"));
     }
   };
 

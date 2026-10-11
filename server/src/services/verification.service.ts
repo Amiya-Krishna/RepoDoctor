@@ -26,6 +26,8 @@ import type {
   VerificationResult,
 } from "../agents/verification.types.js";
 
+import { enforceExecutionEvidence } from "./verification-gate.js";
+
 type VerificationFinding =
   | BugFinding
   | SecurityFinding;
@@ -43,9 +45,12 @@ export const verifyFix = async (
       aiProvider,
     );
 
-  return agent.verify(
+  const verdict = await agent.verify(
     finding,
     fixResult,
     testResult,
   );
+
+  // The Docker result, not the model, has the final say on VERIFIED.
+  return enforceExecutionEvidence(verdict, testResult);
 };

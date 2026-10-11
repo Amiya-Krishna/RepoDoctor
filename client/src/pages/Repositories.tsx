@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import { api } from "../lib/api";
+import { api, getErrorMessage } from "../lib/api";
 import { authHeaders } from "../lib/auth";
 import {
   analyzeRepository,
@@ -32,9 +32,8 @@ function Repositories() {
 
   const loadRepositories = useCallback(async () => {
     try {
-      setLoading(true);
-      setError("");
       setRepositories(await getRepositories());
+      setError("");
     } catch (loadError) {
       console.error(loadError);
       setError("Failed to load repositories. Check your login and GitHub connection.");
@@ -43,9 +42,33 @@ function Repositories() {
     }
   }, []);
 
+  // Explicit refresh shows the loading state; the initial load starts with loading=true.
+  const refreshRepositories = () => {
+    setLoading(true);
+    return loadRepositories();
+  };
+
   useEffect(() => {
-    void loadRepositories();
-  }, [loadRepositories]);
+    let cancelled = false;
+
+    getRepositories()
+      .then((loaded) => {
+        if (!cancelled) setRepositories(loaded);
+      })
+      .catch((loadError) => {
+        console.error(loadError);
+        if (!cancelled) {
+          setError("Failed to load repositories. Check your login and GitHub connection.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const entries = Object.entries(activeJobs);
@@ -172,8 +195,8 @@ function Repositories() {
         return next;
       });
       if (selectedRepositoryId === repositoryId) setSelectedRepositoryId(null);
-    } catch (deleteError: any) {
-      setError(deleteError.response?.data?.message ?? "Failed to remove repository");
+    } catch (deleteError) {
+      setError(getErrorMessage(deleteError, "Failed to remove repository"));
     }
   };
 
@@ -216,7 +239,7 @@ function Repositories() {
   return (
     <section>
       <h2>Your GitHub Repositories</h2>
-      <button onClick={() => void loadRepositories()}>Refresh repositories</button>
+      <button onClick={() => void refreshRepositories()}>Refresh repositories</button>
 
       {error && <p role="alert" style={{ color: "crimson" }}>{error}</p>}
 

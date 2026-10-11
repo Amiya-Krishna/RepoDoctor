@@ -11,17 +11,20 @@ import {
 
 const app = express();
 
-// Register before your route handlers.
-app.use("/api", apiRateLimiter);
+// Behind a reverse proxy (e.g. the bundled nginx) every client would otherwise
+// share the proxy's IP in rate limiting. Opt in with TRUST_PROXY=<hop count>.
+const trustProxyHops = Number(process.env.TRUST_PROXY ?? 0);
+if (Number.isInteger(trustProxyHops) && trustProxyHops > 0) {
+  app.set("trust proxy", trustProxyHops);
+}
 
-// Apply only to your actual login/register router.
-// Replace authRouter with the router name in your project.
-app.use("/api/auth", authRateLimiter, authRoutes);
-
+// Order matters: CORS first (so preflight requests are not rate limited and
+// error responses carry CORS headers), then rate limiting, then body parsing.
 app.use(cors({
   origin: process.env.FRONTEND_URL ?? "http://localhost:5173",
   credentials: true,
 }));
+app.use("/api", apiRateLimiter);
 app.use(express.json({
   verify: (req, _res, buffer) => {
     (req as typeof req & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
@@ -36,7 +39,7 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-app.use("/api/auth", authRoutes);
+app.use("/api/auth", authRateLimiter, authRoutes);
 app.use("/api/github", githubRoutes);
 app.use("/api/repositories", repositoryRoutes);
 app.use("/api/repairs", repairRoutes);

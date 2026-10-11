@@ -115,7 +115,7 @@ GitHub integration → Repository ingestion → Repository context → Analysis
 - **Objective:** registered users can log in and reach protected routes.
 - **Context:** builds on the Day 1 API, `users` table and `JWT_SECRET` setting.
 - **Planned work:** registration, login, JWT, protected routes, password hashing, refresh tokens "if feasible", user storage.
-- **Actual implementation:** `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`. Passwords hashed with `bcryptjs` (cost 10); 8–128 character password rule and e-mail normalization in the controller. JWT payload `{ userId }`, expiry hard-coded to `1d` in `auth.service.ts`. `protect` middleware reads `Authorization: Bearer`. The `JWT_EXPIRES_IN` entry in `.env.example` is **not read by any source file**. The client stores the token in `localStorage`.
+- **Actual implementation:** `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`. Passwords hashed with `bcryptjs` (cost 10); 8–128 character password rule and e-mail normalization in the controller. JWT payload `{ userId }`; expiry comes from `JWT_EXPIRES_IN` (validated, default `1d`) via `resolveTokenExpiry()` in `auth.service.ts` (it was hard-coded and ignored the variable until the third pass). `protect` middleware reads `Authorization: Bearer`. The client stores the token in `localStorage`.
 - **Files and components:** `server/src/routes/auth.routes.ts`, `controllers/auth.controller.ts`, `services/auth.service.ts`, `middleware/auth.middleware.ts`, `prisma/migrations/20260922000000_init`, `client/src/App.tsx`, `client/src/lib/auth.ts`.
 - **Technical workflow:** client posts credentials → controller validates → bcrypt → Prisma `user` row → JWT returned → client sends it on later calls.
 - **Validation:** none run (no auth test script exists).
@@ -198,7 +198,7 @@ GitHub integration → Repository ingestion → Repository context → Analysis
 - **Context:** consumes repository data from Week 1; introduces the first external AI dependency.
 - **Planned work:** provider abstraction, structured outputs, avoid single-provider coupling.
 - **Actual implementation:** `AIProvider` interface (`generate`, `generateStructured`) with `OpenRouterProvider`, `GroqProvider`, `GeminiProvider`. `AIProviderManager` tries providers in order and throws `All AI providers failed` if none succeeds. Models come from environment variables with defaults in `ai.config.ts`.
-- **Files and components:** `server/src/ai/ai.provider.ts`, `ai.provider.manager.ts`, `ai.provider.factory.ts`, `ai.config.ts`, `openrouter.provider.ts`, `groq.provider.ts`, `gemini.provider.ts`, `services/ai.service.ts`.
+- **Files and components:** `server/src/ai/ai.provider.ts`, `ai.provider.manager.ts`, `ai.provider.factory.ts`, `ai.config.ts`, `openrouter.provider.ts`, `groq.provider.ts`, `gemini.provider.ts`.
 - **Technical workflow:** agents call `createAIProvider()` and pass a system prompt, a user prompt and a JSON schema.
 - **Validation:** live scripts `test:ai`, `test:openrouter`, `test:groq`, `test:gemini` exist and need API keys; none was run. A single OpenRouter 429 → Groq fallback was reported in earlier notes but is not reproduced here.
 - **Result:** Implemented, not yet verified.
@@ -293,7 +293,7 @@ GitHub integration → Repository ingestion → Repository context → Analysis
 - **Context:** consumes a saved finding and repository context.
 - **Planned work:** patches from bug reports and context; store proposals; never edit the user's repository.
 - **Actual implementation:** `FixAgent.generateFix(finding, context, formattedContext)` returns a `FixResult` with `changes[]` (`filePath`, `startLine`, `endLine`, `changeType` of `REPLACE`/`DELETE`/`INSERT`, `originalCode`, `replacementCode`), `risk`, `confidence`, `reasoning`. Proposals are stored in `FixProposal` with status `PROPOSED`.
-- **Files and components:** `agents/fix.agent.ts`, `fix.schema.ts`, `fix.types.ts`, `prompts/fix.prompt.ts`, `services/fix-proposal.service.ts`, `services/fix-generation.service.ts`, migration `20261003091709_add_fix_proposals`.
+- **Files and components:** `agents/fix.agent.ts`, `fix.schema.ts`, `fix.types.ts`, `prompts/fix.prompt.ts`, `services/fix-proposal.service.ts`, migration `20261003091709_add_fix_proposals`.
 - **Technical workflow:** called inside every repair attempt (Day 19).
 - **Validation:** `test:fix-agent` needs live AI; not run.
 - **Result:** Implemented, not yet verified.

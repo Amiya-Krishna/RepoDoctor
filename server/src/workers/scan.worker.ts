@@ -9,6 +9,7 @@ import {
   type RepositoryScanResult,
 } from "../queue/scan.queue.js";
 import { ingestRepository } from "../services/ingestion.service.js";
+import { revealToken } from "../security/token-encryption.js";
 
 const start = async () => {
   await connectDatabase();
@@ -63,7 +64,7 @@ const start = async () => {
         const result = await ingestRepository({
           repositoryId,
           cloneUrl: repository.cloneUrl,
-          accessToken: user.githubAccessToken,
+          accessToken: revealToken(user.githubAccessToken),
           defaultBranch: ref || repository.defaultBranch,
           sourceRef: ref || repository.defaultBranch,
           analysisId,

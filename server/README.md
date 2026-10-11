@@ -33,7 +33,7 @@ npm run worker              # separate terminal
 npm run repair-worker       # separate terminal
 ```
 
-PostgreSQL 16 and Redis 7 must be running and match `.env`. Environment variable reference: [Operations §2.2](../docs/OPERATIONS_SECURITY.md#22-server-environment-variables). Notes: Redis uses `REDIS_HOST`/`REDIS_PORT`/`REDIS_USERNAME`/`REDIS_PASSWORD` (not a URL); `JWT_EXPIRES_IN` is not read (tokens last 1 day).
+PostgreSQL 16 and Redis 7 must be running and match `.env`. Environment variable reference: [Operations §2.2](../docs/OPERATIONS_SECURITY.md#22-server-environment-variables). Notes: Redis uses `REDIS_HOST`/`REDIS_PORT`/`REDIS_USERNAME`/`REDIS_PASSWORD` (not a URL); `JWT_EXPIRES_IN` (e.g. `12h`, `1d`) sets token lifetime and falls back to `1d` when invalid.
 
 ## API
 

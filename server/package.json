@@ -13,6 +13,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "test:context": "tsx src/test-context.ts",
     "test:ai": "tsx src/test-ai.ts",
+    "test:ai-selection": "tsx src/test-ai-provider-selection.ts",
     "test:openrouter": "tsx src/test-openrouter.ts",
     "test:groq": "tsx src/test-groq.ts",
     "test:gemini": "tsx src/test-gemini.ts",
@@ -40,7 +41,9 @@
     "test:rag": "tsx src/test-rag.ts",
     "test:benchmark": "tsx src/test-benchmark-evaluator.ts",
     "benchmark:evaluate": "tsx src/benchmark/run-benchmark.ts",
-    "test:security": "tsx src/test-security-controls.ts"
+    "test:security": "tsx src/test-security-controls.ts",
+    "test:verification-gate": "tsx src/test-verification-gate.ts",
+    "test:app": "tsx src/test-app-middleware.ts"
   },
   "keywords": [],
   "author": "",

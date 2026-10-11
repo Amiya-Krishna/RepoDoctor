@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import {
   getAutonomousRepairQueueJob,
   queueAutonomousRepair,
   closeRepairQueue,
 } from "./queue/repair.queue.js";
 import { closeScanQueue } from "./queue/scan.queue.js";
-
-const queuedId = `repair-test-${randomUUID()}`;
 
 try {
   const queued = await queueAutonomousRepair({

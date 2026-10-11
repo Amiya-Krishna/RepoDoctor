@@ -12,6 +12,13 @@ export interface AnalysisPipelineInput {
   analysisId: string;
   repositoryId: string;
   repositoryPath: string;
+  /** Analyzer-derived metadata passed through to the repository context. */
+  metadata?: {
+    projectType?: string;
+    language?: string;
+    framework?: string;
+    packageManager?: string;
+  };
   onProgress?: (stage: string, message: string, percent: number) => Promise<void> | void;
 }
 
