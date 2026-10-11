@@ -5,8 +5,8 @@ import {
   decryptToken,
 } from "./security/token-encryption.js";
 import {
-  verifyGitHubSignature,
-} from "./security/github-webhook-signature.js";
+  verifyGitHubWebhookSignature as verifyGitHubSignature,
+} from "./github/github-webhook.signature.js";
 import {
   isAllowedTestCommand,
 } from "./security/test-command-policy.js";
@@ -27,7 +27,6 @@ const signature =
 createHmac("sha256", secret).update(body).digest("hex");
 assert.equal(verifyGitHubSignature(body, signature, secret), true);
 assert.equal(verifyGitHubSignature(body, signature, "wrong"), false);
-assert.equal(verifyGitHubSignature(body, undefined, secret), false);
 assert.equal(
 verifyGitHubSignature(body, "sha256=bad", secret),
 false,

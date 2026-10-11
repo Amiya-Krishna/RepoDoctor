@@ -2,278 +2,175 @@
 
 ## 1. Purpose and evidence policy
 
-This document is the canonical test and demo plan. It separates test scripts that exist in the source tree from test results that have actually been observed.
+This document separates **test scripts that exist** from **results that were observed**. A command or file existing is never recorded as a pass. For every result the date, environment, exact command and exit code are given.
 
-**No test, build, benchmark, or pull-request creation is claimed as passing solely because a command or implementation file exists.** Record the commit SHA, environment, exact command, exit code, relevant sanitized output, and any required external service. Do not record secrets or full untrusted source snippets.
+Status labels are defined in the [development history](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document).
 
-The previous authoring attempt could not complete `npm ci`, and Docker was unavailable. Therefore the supplied evidence does not establish a successful clean build or complete end-to-end run.
+## 2. Results actually observed
 
-## 2. Validation layers
+The archive contains no `.git` directory, so no commit SHA exists to record.
 
-1. **Static/configuration:** TypeScript builds, lint, Prisma schema validation, lockfile consistency.
-2. **Focused unit/component tests:** parser/validator, risk engine, context builder, webhook signature, retry policy, workspace validation.
-3. **Service integration:** PostgreSQL migrations/persistence, Redis/BullMQ queues, worker progress, Socket.IO and REST status recovery.
-4. **External integration:** GitHub OAuth/API/webhook, AI provider selection/failover, pull-request creation.
-5. **Safety/security:** source immutability, patch path validation, token isolation, Docker limits, forged webhook rejection, authorization boundaries.
-6. **End-to-end acceptance:** scan a disposable repository, inspect findings, repair a seeded defect, verify it, and create a pull request only on success.
-7. **Evaluation:** benchmark detection and repair on a versioned dataset with defined ground truth.
+**Environment for every entry below:** 11 October 2026, Linux 6.18, Node.js 22.22.0, `tsx` installed globally, run inside a **scratch copy** of the archive (the delivered files were not touched). `npm install` was **not** run, so no `node_modules` existed; only scripts that depend on nothing but Node built-ins and project files could run. No Docker, Redis, PostgreSQL, GitHub or AI provider access.
 
-## 3. Clean-checkout validation sequence
+| Test | Command (from `server/`) | Services/credentials needed | Exit | Result | Evidence (sanitized) |
+|---|---|---|:-:|---|---|
+| Risk engine | `npm run test:risk-engine` (executed as `tsx src/test-risk-engine.ts`) | none | 0 | **PASS** (script prints, does not assert) | printed overall score 73, level CRITICAL, priority P0, 3 findings (1 critical, 1 high, 1 medium) |
+| Webhook signature | `npm run test:webhook-signature` | none | 0 | **PASS** | `GitHub webhook signature tests passed.` |
+| Static security scanner | `npm run test:static-security` | none | 0 | **PASS** | `Static security scanner tests passed.` |
+| Benchmark evaluator | `npm run test:benchmark` | none | 0 | **PASS** | `Benchmark evaluator tests passed.` |
+| Security control modules | `npm run test:security` with a throw-away random `GITHUB_TOKEN_ENCRYPTION_KEY` | none | 0 | **PASS** | `Security control tests passed.` Proves the modules behave; does **not** prove the app uses them |
+| Benchmark CLI on the example file | `tsx src/benchmark/run-benchmark.ts benchmarks/seeded-repo/ground-truth.json benchmarks/seeded-repo/run-results.example.json` | none | 0 | ran | 1 of 5 expected found → recall 0.2, F1 ≈ 0.33. **Illustrative example data, not a measurement.** Default paths in the script point at files that do not exist |
+| RAG | `npm run test:rag` | PostgreSQL, dependencies | 1 | **BLOCKED** | `ERR_MODULE_NOT_FOUND` (no installed dependencies) |
+| Context builder | `npm run test:context -- <path>` | a repository path | 1 | **NOT RUN** | exited on the missing path argument |
+| Repair workspace | `npm run test:repair-workspace -- <git-repo-path>` | a git repository path | 1 | **NOT RUN** | exited on the missing path argument |
 
-Run from a clean checkout and retain the outputs. First ensure the lockfiles correspond to the package manifests. If they are stale, run `npm install` in both packages, review the changes, and commit them before using `npm ci` in CI.
+Nothing else has been run. In particular **not run**: `npm install`, `npm run build` (server and client), `npm run lint` (client), `npx prisma validate`, migrations on a database, any queue test, any Docker test, any live AI or GitHub test, any browser test. Their status is **NOT RUN**, which is not a pass.
 
-### 3.1 Backend setup and build
+## 3. Test and script inventory (from `package.json`)
 
-```powershell
-cd server
-npm install
-npx prisma validate
-npx prisma generate
-npm run build
-```
+There is no test framework and no `npm test` in `server/`; each `test:*` script is a standalone `tsx` program. The client has no tests (`build` and `lint` only).
 
-For a reproducible CI run after lockfiles are current:
+| Script | Needs | Observed? |
+|---|---|---|
+| `test:risk-engine`, `test:webhook-signature`, `test:static-security`, `test:benchmark`, `test:security` | nothing external | passed (§2) |
+| `benchmark:evaluate` | ground-truth and run-results JSON paths | ran on the example file (§2) |
+| `test:context` | repository path | not run |
+| `test:repair-workspace` | git repository path | not run |
+| `test:rag`, `test:analysis-pipeline`, `test:repair-job-history`, `test:repair-job-pagination`, `test:repair-job-metrics` | PostgreSQL (and, for the pipeline, AI keys) | not run |
+| `test:scan-queue`, `test:repair-queue` | Redis (BullMQ), possibly PostgreSQL | not run |
+| `test:ai`, `test:openrouter`, `test:groq`, `test:gemini`, `test:bug-agent`, `test:security-agent`, `test:test-generation`, `test:fix-agent`, `test:verification-agent` | live AI keys | not run |
+| `test:docker-runner` | Docker daemon | not run |
+| `test:repair-retry`, `test:autonomous-repair` | PostgreSQL, AI, Docker, repository fixture | not run |
+| `test:github-pr` | GitHub token and a disposable repository | not run |
+| Client `build`, `lint` | `npm install` | not run |
+| `npx prisma validate`, `npm run prisma:deploy` | dependencies, database | not run |
 
-```powershell
-npm ci
-npm run build
-```
+## 4. Validation layers (target)
 
-Use the project’s migration procedure against a fresh disposable PostgreSQL database:
+1. Static: server and client builds, client lint, Prisma validate, lockfiles consistent with manifests. (`express-rate-limit` was undeclared and was added on 11 October 2026; no install/build has been run since.)
+2. Focused unit scripts (the §2 set and `test:context`).
+3. Service integration: migrations on a fresh PostgreSQL, Redis queues, worker progress, Socket.IO plus REST recovery.
+4. External integration: OAuth, GitHub API, webhook delivery, AI failover, PR creation.
+5. Safety: source immutability, patch path validation, token isolation, Docker limits, forged-webhook rejection, cross-user authorization.
+6. End-to-end acceptance on a disposable repository.
+7. Evaluation on a versioned seeded dataset.
 
-```powershell
-npx prisma migrate deploy
-```
+## 5. Integration test matrix (what must be demonstrated)
 
-Confirm that the database schema and generated Prisma client agree. Do not use `prisma migrate reset` against valuable data.
-
-### 3.2 Frontend build and lint
-
-```powershell
-cd client
-npm install
-npm run build
-npm run lint
-```
-
-If a script is absent from the current package manifest, record that fact and either add the intended script or remove it from the documented command list. Do not report an absent command as a passed check.
-
-### 3.3 Focused backend checks
-
-The original package manifest includes these focused scripts; verify the current manifest before execution:
-
-```powershell
-cd server
-npm run test:context
-npm run test:bug-agent
-npm run test:security-agent
-npm run test:test-generation
-npm run test:risk-engine
-npm run test:analysis-pipeline
-npm run test:fix-agent
-npm run test:repair-workspace
-npm run test:docker-runner
-npm run test:verification-agent
-npm run test:repair-retry
-npm run test:github-pr
-npm run test:autonomous-repair
-```
-
-The reconciled Day 22–24 package may also define queue/webhook/job-history scripts such as:
-
-```powershell
-npm run test:webhook-signature
-npm run test:scan-queue
-npm run test:repair-queue
-npm run test:repair-job-history
-npm run test:repair-job-pagination
-npm run test:repair-job-metrics
-```
-
-Run only scripts that actually exist in the checked-out `server/package.json`. Some tests require AI keys, GitHub credentials, Docker, Redis, PostgreSQL, or a dedicated test environment. Label tests that need external services; never silently skip them and call the suite complete.
-
-## 4. Integration test matrix
-
-| Area | Test | Required evidence | Failure behavior expected |
+| Area | Test | Evidence required | Expected behaviour |
 |---|---|---|---|
-| Authentication | Register, login, invalid credentials, expired token | HTTP responses and sanitized logs | Unauthorized request is rejected; no token/secret leaks |
-| Authorization | User A requests User B's repository/job/finding | Explicit negative test | Request denied without exposing existence-sensitive details |
-| GitHub OAuth | State mismatch/expiry and valid callback | Browser or API trace, no credentials | Invalid state is rejected; callback does not accept arbitrary state |
-| Repository sync | List repositories for connected user | Repository IDs and counts, redacted | Only repositories permitted to the user are returned |
-| Ingestion | Queue scan and inspect source ref/snapshot | Job ID, persisted analysis, source ref | Failed job is recorded and temporary workspace cleaned |
-| Context builder | Repository with source, config, ignored and oversized files | Context contents and exclusions | Secret/dependency/binary files excluded according to policy |
-| AI provider manager | Primary success; rate limit; secondary success; all providers fail | Sanitized provider transitions | No fabricated findings; error/empty result remains explicit |
-| Bug/security agents | Known positive and negative fixtures | Expected finding matching | Findings include evidence; false positives are measured |
-| Risk engine | Boundary values and severity combinations | Deterministic expected output | Same inputs produce same score/level/priority |
-| Test generation | Known defect fixture | Generated proposal and validation result | Invalid or unsupported output is rejected or clearly marked |
-| Repair workspace | Patch a disposable repository | Source hash/status before and after | Original checkout remains unchanged |
-| Patch validation | `../` paths, absolute paths, symlinks, huge patch, malformed schema | Negative test report | Patch rejected before writing outside workspace |
-| Docker runner | Timeout, nonzero exit, oversized output, network attempt | Container config and test logs | Execution is bounded; no secret/network escape; failure is not success |
-| Retry loop | Fail once then pass; fail all attempts; inconclusive result | Attempt history up to three | No more than three attempts; inconclusive stops; retries use prior evidence |
-| PR publisher | Verified, failed, inconclusive and error statuses | GitHub test repo PR list and logs | Only verified state can create PR; no auto-merge/default-branch push |
-| BullMQ | Worker down, retry, duplicate job, Redis restart | Queue/job status and worker logs | Work is recoverable/deduplicated according to policy |
-| Webhook | Valid signature, invalid signature, duplicate delivery | HTTP status and queue count | Invalid signature rejected; duplicate delivery does not enqueue duplicate work |
-| Socket.IO | Valid/invalid JWT, missed event, reconnect | Browser trace plus REST status | User-room isolation enforced; REST status recovers missed progress |
-| Cleanup | Worker crash, timeout, cancellation | Workspace inventory | Temporary workspaces are eventually removed without deleting user data |
+| Authentication | register, login, wrong password, expired token | HTTP responses | rejected without leaking details |
+| Authorization | user A requests user B's repository, analysis, finding, job | negative-test output | 404, no existence leak |
+| OAuth | state mismatch, expiry, valid callback | trace without secrets | invalid state rejected |
+| Ingestion | scan a disposable repository | job id, `Analysis` row, `sourceRef` | failure recorded, workspace removed |
+| Context | repository with ignored/oversized files | included file list | ignored directories and big files excluded |
+| AI manager | primary success, 429, secondary success, all fail | provider transition log | explicit error, no invented findings; confirm Groq/Gemini work without an OpenRouter key (currently the config import throws) |
+| Agents | known positive and negative fixtures | matched findings | measured false positives |
+| Risk engine | boundary severities | deterministic output | same input, same score |
+| Generated tests | pipeline run | `GeneratedTest` rows | **currently expected to be empty**; fix then re-test |
+| Repair workspace | patch a fixture, hash source clone before/after | hash and status | source clone unchanged |
+| Patch validation | `../`, absolute, symlink, huge patch | negative report | rejected before write |
+| Docker runner | timeout, non-zero exit, huge output, network attempt | container flags, logs | bounded; failure is not success |
+| Verification gate | Docker run fails but model says `VERIFIED` | PR gate output | **currently expected to pass the gate**; fix then re-test |
+| Retry loop | fail once then pass; fail 3 times; inconclusive | attempt rows | ≤ 3 attempts; inconclusive stops |
+| PR publisher | verified, failed, inconclusive, error | PR list of the test repository | only verified can publish; no merge |
+| Queues | worker down, retry, duplicate delivery, Redis restart | job states | recoverable and de-duplicated |
+| Webhook | valid, invalid, duplicate delivery | HTTP codes and queue count | invalid 401; duplicate not re-queued |
+| Socket.IO | valid and invalid JWT, missed event, reconnect | trace plus REST status | user rooms isolated |
+| Rate limits | 11th failed login, 101st request | HTTP 429 | enforced (dependency now declared; not yet run) |
+| Compose | clean machine, `docker compose up` | `docker compose ps`, logs | all services healthy (currently expected to fail, see Operations §6) |
 
-## 5. End-to-end demo protocol
+## 6. Seeded-defect benchmark
 
-Use a **disposable test repository**. Do not demonstrate autonomous repair against a valuable production repository.
+### 6.1 What exists
 
-### Preparation
+- `server/benchmarks/seeded-repo/` with five seeded defects: `BUG-001` null handling in `src/user.ts`, `BUG-002` input validation in `src/profile.ts`, `BUG-003` async error handling in `src/payment.ts`, `SEC-001` authorization in `src/admin.ts`, `SEC-002` code injection in `src/parse.ts`; `ground-truth.json` lists file and category per case.
+- `server/src/benchmark/benchmark-evaluator.ts` and `run-benchmark.ts` compute detection and repair metrics from two JSON files (unit-tested, §2).
+- `run-results.example.json` — **hand-written example**, not an output of RepoDoctor.
 
-1. Create a small JavaScript/TypeScript repository with a clear, reproducible seeded defect.
-2. Include a test that fails before the fix and passes after the correct fix.
-3. Record the expected defect, expected file/line, expected behavior, baseline commit SHA, and test command outside the detection system.
-4. Confirm GitHub token permissions are limited to the test repository and the Docker runner receives no credentials.
-5. Start PostgreSQL, Redis, API, scan worker, repair worker, and client. Check health/logs.
+### 6.2 What does not exist
 
-### Demo run
+- No script that runs the pipeline over the fixture and writes `run-results.json`.
+- No test script in the seeded fixture, so any repair there would be inconclusive.
+- No mapping between ground-truth categories (`null_handling`, `code_injection`, `async_error_handling`, …) and the agents' categories (`LOGIC`, `RUNTIME`, `INJECTION`, `ASYNC`, …). Only categories that happen to normalize to the same string (for example `authorization` / `AUTHORIZATION`) would match.
+- No line-level matching, latency percentiles or retry distribution.
+- **No measured results.** The original plan's "50 seeded defects" was an example target; the fixture has 5.
 
-1. Register/sign in.
-2. Complete GitHub OAuth and refresh repository listing.
-3. Queue a scan and capture the job ID.
-4. Show progress in the UI and confirm REST status also reports progress/completion.
-5. Open the persisted analysis and inspect finding evidence, severity/risk, and generated test proposal.
-6. Trigger repair for the seeded defect.
-7. Show that repair occurs in a disposable workspace, not the source checkout.
-8. Show Docker verification logs and the explicit final status.
-9. For a verified result, show the new repair branch and pull request. Confirm it is not merged automatically.
-10. Repeat with an intentionally unfixable or inconclusive fixture and demonstrate that no pull request is created.
-11. Confirm the source repository commit and working tree remain unchanged.
-12. Capture genuine screenshots and sanitized logs. Include the project commit SHA and environment summary in the demo notes.
+### 6.3 Metrics as implemented
 
-### Suggested screenshots
+True positive = a detected finding with the same normalized file path and category as an expected case (one-to-one). Precision = TP/(TP+FP); recall = TP/(TP+FN); F1; false-discovery rate; verification rate, test-pass rate and PR-creation rate over attempted/verified repairs; average attempts; average repair duration; elapsed time. Report the denominator for every rate.
 
-- Repository dashboard with a selected test repository.
-- Analysis detail with real findings and evidence.
-- Repair status showing attempts and verification result.
-- Docker verification output with secrets redacted.
-- GitHub pull request page from the disposable test repository.
-- Failed/inconclusive example showing no PR was created.
+### 6.4 Required reproducibility metadata (to record with any real run)
 
-Only include screenshots from the actual running app. Do not create mock UI screenshots and present them as proof of implementation.
+Dataset version and hash, code commit SHA, Node/npm/Docker versions, OS, provider and model, prompt version, concurrency, timeouts, test commands, date, failed and excluded cases with reasons; separate synthetic fixtures from real repositories.
 
-## 6. Seeded-defect benchmark protocol (Day 26 target)
+### 6.5 Results
 
-The supplied archive does not include measured benchmark results. Use the following protocol before reporting any score.
-
-### 6.1 Dataset design
-
-Each benchmark case should include:
-
-- Unique case ID and dataset version.
-- Repository fixture and baseline commit SHA/hash.
-- Defect category and severity label.
-- Ground-truth affected file/line range and expected behavior.
-- Baseline test command and proof that the defect is reproducible.
-- Expected fix criteria and regression tests.
-- Whether the case is eligible for autonomous repair or detection-only evaluation.
-
-Avoid near-duplicate fixtures that inflate apparent performance. Keep ground-truth labels unavailable to the model pipeline.
-
-### 6.2 Metrics
-
-- **Precision** = true positive detections / all positive detections.
-- **Recall** = true positive detections / all ground-truth defects.
-- **F1** = harmonic mean of precision and recall.
-- **False-positive count/rate** = incorrect findings among evaluated negative or unmatched cases.
-- **Verified repair rate** = cases with a correctly verified repair / repair-eligible cases attempted. Report denominator and exclusions.
-- **Test pass rate** = repaired cases whose defined verification suite passes / cases tested.
-- **PR creation rate** = eligible verified cases with successfully created PRs / eligible verified cases attempted for publication.
-- **Latency** = report median and a tail percentile, not just a single average; define whether queue time and provider wait are included.
-- **Retry distribution** = share of cases requiring one, two, or three attempts.
-
-Define the matching policy before running the benchmark. A finding counts as a true positive only if it matches the labeled defect under that policy; a repair counts as correct only if it fixes the intended behavior without failing required regression checks.
-
-### 6.3 Required reproducibility metadata
-
-Record dataset version/hash, repository fixture hashes, code commit SHA, Node/npm/Docker versions, OS, provider/model, prompt/config version, concurrency, timeouts, test commands, date, failed cases, excluded cases, and reason for each exclusion. Separate local synthetic results from results on real repositories.
-
-### 6.4 Results template
-
-Do not replace the blanks until the benchmark has actually run.
-
-| Metric | Result | Denominator / notes |
+| Metric | Result | Notes |
 |---|---:|---|
-| Cases evaluated | Pending | Dataset version/hash: pending |
-| Precision | Pending | Matching policy: pending |
-| Recall | Pending | Ground-truth positives: pending |
-| F1 score | Pending | Calculated from measured precision/recall |
-| False positives | Pending | Include negative cases and unmatched findings |
-| Verified repair rate | Pending | Define repair-eligible denominator |
-| Test pass rate | Pending | State exact verification suite |
-| PR creation rate | Pending | Only verified eligible cases |
-| Median latency | Pending | State included stages |
-| 95th percentile latency | Pending | State sample size |
+| Cases evaluated | Pending | no real run exists |
+| Precision | Pending | |
+| Recall | Pending | |
+| F1 | Pending | |
+| False positives | Pending | |
+| Verified repair rate | Pending | |
+| Test pass rate | Pending | |
+| PR creation rate | Pending | |
+| Median / p95 latency | Pending | not implemented in the evaluator |
 
 ## 7. Test result log template
 
-Use one entry per command or acceptance test:
-
 ```text
 Date/time (timezone):
-Commit SHA:
+Commit SHA (n/a if no git history):
 Environment (OS, Node, npm, Docker):
 Test name:
 Exact command:
-Required services/credentials present (yes/no; do not list secret values):
+Services/credentials present (yes/no, never values):
 Exit code:
 Result: PASS / FAIL / BLOCKED / NOT RUN
 Evidence location:
 Failure summary (sanitized):
-Follow-up issue:
+Follow-up:
 ```
 
-`BLOCKED` means the test could not run because a prerequisite was unavailable. `NOT RUN` is not a pass. Preserve failure evidence and rerun after the underlying problem is fixed.
+`BLOCKED` = a prerequisite was unavailable. `NOT RUN` is not a pass.
 
-## 8. Day 30 release acceptance checklist
+## 8. End-to-end demonstration protocol (Day 21 and Day 30)
 
-Mark a box only after collecting evidence.
+Use a **disposable GitHub repository**; never demonstrate autonomous repair on valuable code.
 
-### Build and database
+**Preparation.** Create a small JavaScript/TypeScript repository with one reproducible seeded defect and a test that fails before and passes after the correct fix, with the test needing **no installed dependencies** (the runner has no network and the clone has no `node_modules`; use `node:test` or plain `node` scripts, for example the style of `test-generation-repo/`). Record the expected file, line, behaviour, baseline commit and test command outside RepoDoctor. Use a token limited to that repository. Start PostgreSQL, Redis, API, scan worker, repair worker and client, and confirm Docker is reachable from the repair worker.
 
-- [ ] Backend clean install and `npm run build` pass.
-- [ ] Frontend clean install, `npm run build`, and lint pass.
-- [ ] Both lockfiles match package manifests and are committed.
-- [ ] `npx prisma validate` and client generation pass.
-- [ ] Migrations apply to a fresh disposable PostgreSQL database.
-- [ ] Backup/restore procedure is tested for any persistent deployment.
+**Run.** Register/sign in → connect GitHub → refresh repositories → scan (capture job id) → watch progress in the UI and confirm the REST status agrees → inspect the analysis → start a repair with the test command (for example `npm test`) → watch attempts → show the explicit verification result → for a verified result show the branch and the open, **unmerged** pull request → repeat with an unfixable fixture and show no PR → confirm the source repository is unchanged → capture real screenshots and sanitized logs with the commit SHA.
 
-### Functional integration
+**Screenshots to capture (none exist yet):** repository list; analysis with findings and risk; repair status with attempts; Docker verification output (redacted); the pull request; a failed or inconclusive case with no PR.
 
-- [ ] Register/login and GitHub OAuth pass in a browser.
-- [ ] Repository list/sync and scan queue work with a real test repository.
-- [ ] Unified pipeline persists expected analysis and passes the correct repository ID.
-- [ ] Queue retries, duplicate delivery handling, job status, and worker recovery are verified.
-- [ ] Signed webhook succeeds; invalid signature and duplicate delivery are rejected/deduplicated.
+## 9. Release checklist (Day 30)
+
+Mark a box only after collecting evidence. **Currently only the five unit-level scripts in §2 have evidence; every box is unchecked.**
+
+- [ ] Server clean install and build pass; `express-rate-limit` declared (done 11 Oct 2026); lockfiles match manifests.
+- [ ] Client clean install, build and lint pass.
+- [ ] `npx prisma validate` passes; migrations apply to a fresh PostgreSQL.
+- [ ] Register/login and OAuth work in a browser.
+- [ ] Scan queue, webhook delivery, de-duplication and worker recovery work.
 - [ ] Socket.IO progress and REST recovery work across reconnects.
-- [ ] Repair workflow produces a valid PR only after successful verification.
-- [ ] Failed and inconclusive cases create no PR and are not reported as success.
+- [ ] Generated tests are persisted (currently not).
+- [ ] Verified repair opens a PR; failed and inconclusive repairs do not.
+- [ ] A failing Docker run cannot be accepted as `VERIFIED` (currently not enforced).
+- [ ] Source clone unchanged by repair; path traversal, symlink and oversized-patch cases rejected.
+- [ ] Test container has no credentials and no network.
+- [ ] Cross-user authorization tests pass.
+- [ ] Tokens encrypted at rest (currently not wired).
+- [ ] Rate limits, audit logging and webhook replay policy validated.
+- [ ] Compose stack starts on a clean machine and passes a smoke test.
+- [ ] Real screenshots and a reproducible demo exist.
+- [ ] Benchmark numbers are measured with metadata, or remain "Pending".
+- [ ] Release notes record the commit SHA and environment.
 
-### Safety and security
+## 10. Interview-ready explanation (for use after a demonstration)
 
-- [ ] Source repository remains unchanged throughout repair.
-- [ ] Path traversal, symlink, malformed patch, oversized patch, timeout, and resource exhaustion tests pass.
-- [ ] Docker test container has no GitHub/AI/database credentials and no unapproved network access.
-- [ ] User/job/repository authorization tests prevent cross-user access.
-- [ ] GitHub tokens are encrypted at rest before production use.
-- [ ] Rate limits, secret redaction, webhook replay policy, and production secret management are validated.
-- [ ] No default-branch push, force-push, or automatic merge occurs.
+> "RepoDoctor AI is an AI-assisted analysis and repair workflow for JavaScript/TypeScript repositories. It builds repository context, runs structured bug and security analysis with deterministic scoring, generates a fix, applies it in a disposable workspace, runs the repository's tests in a network-less Docker container, asks a verification step to judge the evidence, retries up to three times, and opens a pull request only after verification succeeds. It never merges. Background jobs run on BullMQ and progress streams over Socket.IO. The data layer is PostgreSQL with Prisma. Repository memory is lexical hashed-vector retrieval, not neural embeddings. I have unit-level evidence for the risk engine, webhook signature, static scanner and benchmark evaluator; the end-to-end loop, the benchmark and the deployment are not yet validated, and I know the specific gaps."
 
-### Documentation and release
-
-- [ ] Real screenshots and a reproducible demo are included.
-- [ ] Benchmark numbers are measured and reproducible, or explicitly marked pending.
-- [ ] Known limitations and unsupported repository types are documented.
-- [ ] No development credentials or secrets are committed.
-- [ ] Release notes identify the exact commit SHA and test environment.
-- [ ] All blocking failures are fixed or explicitly disclosed; no pending test is described as passing.
-
-## 9. Interview-ready project explanation
-
-A defensible summary after the workflow has been demonstrated is:
-
-> “RepoDoctor AI is an AI-assisted code-analysis and repair workflow for JavaScript/TypeScript repositories. It combines repository context, structured bug/security analysis, deterministic risk scoring, isolated patch application, Docker-based verification, bounded retries, background queues, and GitHub pull-request creation behind a verification gate. It does not automatically merge repairs. I evaluate it using seeded defects and report measured detection, repair, and execution results along with its limitations.”
-
-Use the summary only to describe features actually demonstrated in the current commit. If RAG, benchmark results, token encryption, or production deployment remain incomplete, say so directly rather than implying they are finished.
+Use it only to describe what has been demonstrated at the current commit.

@@ -1,243 +1,204 @@
 # RepoDoctor AI — Architecture and Design
 
-**Documentation baseline:** uploaded reconciled project archive and supporting documents, reviewed 10 October 2026. This document distinguishes source-tree evidence from runtime verification.
+**Baseline:** the supplied archive, audited by static inspection on 11 October 2026. Status labels are defined in [Development history §1.2](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document). Day references (for example "Day 17") point to sections of the [Day 1–30 history](DEVELOPMENT_HISTORY.md). Nothing here is claimed as passing unless a check is named.
 
 ## 1. System goals
 
-RepoDoctor aims to assist a developer with repository analysis and a cautious repair workflow:
+RepoDoctor is a student portfolio project that attempts to detect selected classes of defects in JavaScript and TypeScript repositories, propose fixes, apply them in an isolated workspace, run tests in Docker, verify the evidence, retry a bounded number of times and open a GitHub pull request only when verification succeeds. It never merges. Passing tests is evidence, not proof of correctness.
 
-1. Connect a user to GitHub and list repositories available to that user.
-2. Ingest a selected repository into a temporary workspace and record its source reference.
-3. Analyze repository structure and build context for AI agents.
-4. Produce structured bug/security findings, test proposals, and deterministic risk assessments.
-5. Generate a structured repair proposal for a selected finding.
-6. Apply the proposal in a disposable repair workspace.
-7. Run configured verification in Docker and classify the evidence conservatively.
-8. Publish a pull request only if verification succeeds.
-9. Keep the user informed through job status and live progress events.
+The defensible product claim is: *RepoDoctor attempts to detect selected classes of defects in JavaScript/TypeScript repositories, proposes and applies fixes in an isolated environment, verifies them through automated tests, and creates a pull request when validation succeeds.* An end-to-end run supporting that sentence has **not** yet been recorded.
 
-The design favors safety and traceability over claiming that AI output is always correct. Passing tests is useful evidence, not a mathematical proof of correctness.
+## 2. Actual technology stack
 
-## 2. Technology and module boundaries
-
-| Layer | Responsibility | Main technologies |
+| Layer | Implementation | Source of truth |
 |---|---|---|
-| Web client | Authentication UI, repository selection, analysis/history display, progress, repair status | React, TypeScript, Vite |
-| HTTP API | Authentication, repository operations, scan/repair requests, status endpoints, webhook endpoint | Node.js, Express, TypeScript ESM/NodeNext |
-| Persistence | Users, linked repositories, analysis results, findings, proposals, job/repair records | PostgreSQL, Prisma |
-| Queue | Durable asynchronous scan/repair scheduling and job lifecycle | Redis, BullMQ |
-| Scan worker | Clone/read repository, inspect structure, run analysis pipeline, persist results/progress | Node.js worker process |
-| Repair worker | Execute the bounded repair workflow and verified-only publication path | Node.js worker process |
-| AI provider layer | Provider abstraction and provider switching | `AIProviderManager`, OpenRouter/Groq/Gemini |
-| Repair execution | Isolated patch application and controlled tests | Disposable workspace, Docker runner |
-| GitHub integration | OAuth, repository API, webhook event intake, branch/PR publication | GitHub OAuth/API/webhooks |
-| Live status | User-scoped progress notifications and REST recovery | Socket.IO + JWT |
+| Web client | React 19, TypeScript, Vite, axios, `socket.io-client` | `client/package.json` |
+| API | Node 22, Express 5, TypeScript, ESM/NodeNext | `server/package.json`, `server/tsconfig.json` |
+| Database | **PostgreSQL via Prisma 6** (not MongoDB); 16 migrations | `server/prisma/` |
+| Queue | Redis + BullMQ 5; two queues, two worker processes | `server/src/queue/`, `server/src/workers/` |
+| Real-time | Socket.IO 4 with JWT handshake; per-user rooms | `server/src/realtime/socket.ts` |
+| AI | `AIProviderManager`: OpenRouter → Groq → Gemini | `server/src/ai/` |
+| Execution | `docker run` through `child_process.execFile` | `server/src/execution/docker.runner.ts` |
+| GitHub | OAuth, REST (axios), git over HTTPS, webhooks | `server/src/github/`, `server/src/services/github.service.ts` |
+| Memory/RAG | Lexical hashed vectors in PostgreSQL JSON | `server/src/rag/`, `server/src/services/repository-memory.service.ts` |
+| Deployment | `docker-compose.yml` (see defects in [Operations](OPERATIONS_SECURITY.md)) | repository root |
 
-## 3. High-level system diagram
+Not present: refresh tokens, CI/CD workflows, AWS deployment, a vector database, neural embeddings, Prettier/ESLint for the server.
+
+## 3. System diagram
+
+This diagram is the single reference architecture. Other diagrams in the documentation are subsets of it. Dashed arrows mark flows that are **partially implemented or indirect** (generated tests are not persisted; progress reaches the gateway through Redis queue events). Known gaps are listed in §9.
 
 ```mermaid
 flowchart TD
-    DEV[Developer] --> UI[React + TypeScript]
-    UI --> API[Express API]
-    API --> AUTH[JWT / GitHub OAuth]
-    API --> DB[(PostgreSQL + Prisma)]
-    API --> SCANQ[Redis / BullMQ scan queue]
-    API --> REPAIRQ[Redis / BullMQ repair queue]
-    WH[GitHub webhook] --> SIG[Raw-body HMAC validation]
-    SIG --> SCANQ
+    DEV[Developer] --> UI[React client]
+    UI -->|REST + JWT| API[Express API]
+    UI <-->|Socket.IO + JWT| RT[Realtime gateway in API process]
+    API --> RL[Rate limiter - in memory]
+    API --> DB[(PostgreSQL via Prisma)]
+    API -->|202 + jobId| SCANQ[[BullMQ: repository-scan]]
+    API -->|202 + jobId| REPAIRQ[[BullMQ: autonomous-repair]]
+    GH[GitHub webhook] -->|HMAC-SHA256| API
+    GH2[GitHub OAuth and REST] <--> API
+
     SCANQ --> SW[Scan worker]
-    SW --> ING[Temporary repository ingestion]
-    ING --> SNAP[Static analyzer / snapshot]
-    ING --> PIPE[Unified analysis pipeline]
-    PIPE --> BUG[Bug detection]
-    PIPE --> SEC[Security analysis]
-    PIPE --> TEST[Test proposals]
-    BUG --> RISK[Deterministic risk engine]
+    SW --> ING[Repository ingestion: shallow clone in temp workspace]
+    ING --> SNAP[Repository analyzer snapshot]
+    ING --> PIPE[Analysis pipeline]
+    PIPE --> CTX[Repository context]
+    PIPE --> MEM[Repository memory: index + retrieve]
+    CTX --> BUG[Bug detection agent]
+    CTX --> SEC[Security agent + static scanner]
+    CTX --> TST[Test generation agent]
+    MEM --> BUG
+    MEM --> SEC
+    MEM --> TST
+    BUG --> RISK[Risk engine]
     SEC --> RISK
-    TEST --> RISK
     RISK --> DB
-    API --> REPAIRQ
+    BUG --> DB
+    SEC --> DB
+    TST -. not persisted .-> DB
+
     REPAIRQ --> RW[Repair worker]
-    RW --> WS[Disposable repair workspace]
-    WS --> PATCH[Validated FixResult application]
+    RW --> CLONE[Disposable source clone]
+    CLONE --> LOOP[Retry loop, max 3]
+    LOOP --> FIX[Fix agent]
+    FIX --> WS[Per-attempt repair workspace + branch]
+    WS --> PATCH[Validated patch application]
     PATCH --> DOCKER[Docker test runner]
-    DOCKER --> VERIFY{Strict verification}
-    VERIFY -->|FAILED| RETRY[Replan / bounded retry]
-    RETRY --> WS
-    VERIFY -->|INCONCLUSIVE| STOP[Stop and record evidence]
-    VERIFY -->|VERIFIED| PR[Commit branch / create pull request]
-    PR --> HUMAN[Human review and merge]
-    SW --> LIVE[Queue events / Socket.IO]
-    RW --> LIVE
-    LIVE --> UI
-    DB --> UI
+    DOCKER --> VER[Verification agent]
+    VER -->|FAILED or ERROR, attempts left| LOOP
+    VER -->|INCONCLUSIVE| STOP[Stop, no PR]
+    VER -->|FAILED, 3 attempts used| STOP
+    VER -->|VERIFIED + PR gate| PR[Branch, commit, push, pull request]
+    PR --> HUMAN[Human review, no auto-merge]
+
+    SW -.progress.-> RT
+    RW -.progress.-> RT
 ```
 
-The diagram represents the intended flow described by the archive. It is not evidence that the whole system has passed a live end-to-end run.
-
-## 4. Analysis flow
-
-### 4.1 Repository ingestion and snapshot
-
-The API accepts a scan request and, in the reconciled design, enqueues it for a scan worker. The worker clones or otherwise stages the selected repository in a temporary workspace, records the analyzed source reference, inspects repository metadata, and runs the analysis pipeline while the required source context still exists. Cleanup must occur in a `finally`-style lifecycle so a failed analysis does not leave unnecessary workspace data behind.
-
-The original GitHub repository is not modified during ingestion or analysis. Repository scripts should not be executed just to detect framework or package metadata.
-
-### 4.2 Context and AI provider management
-
-The AI provider architecture is managed through `AIProviderManager` and the provider factory. The recorded order is:
-
-1. OpenRouter — primary.
-2. Groq — secondary.
-3. Gemini — tertiary.
-
-The supplied notes record an OpenRouter HTTP 429 followed by a successful Groq response. That is a recorded focused observation, not a guarantee that all provider failover cases work today. Live integration should be repeated after dependency and environment setup.
-
-The repository context API requires both arguments:
-
-```ts
-buildRepositoryContext(repositoryPath, repositoryId)
-```
-
-The actual repository ID must be passed; do not substitute an analysis ID. TypeScript uses ESM/NodeNext, so relative TypeScript imports generally use `.js` extensions in source imports, for example:
-
-```ts
-import { runDockerTest } from "../execution/docker.runner.js";
-```
-
-### 4.3 Unified analysis pipeline
-
-The recorded pipeline runs the following stages and persists their outputs:
-
-- Bug detection agent.
-- Security analysis agent and selected deterministic heuristic checks.
-- Test-generation agent, which proposes tests rather than guaranteeing they are executable in every target repository.
-- Deterministic risk calculation based on finding properties.
-- Persistence and progress reporting.
-
-Risk scoring is application logic, not an LLM verdict. Its calibration against a representative benchmark remains unmeasured.
-
-## 5. Repair flow and invariants
+## 4. Source layout
 
 ```text
-Persisted finding
-      ↓
-Fix agent → structured FixResult
-      ↓
-Validate proposal and target paths
-      ↓
-Create disposable repair workspace + repair branch
-      ↓
-applyFixResult(repositoryPath, fixResult)
-      ↓
-runDockerTest() in Docker
-      ↓
-Evidence-based verification
-      ├── VERIFIED → commit/push repair branch → create PR
-      ├── FAILED → use failure evidence to replan → retry if attempts remain
-      └── INCONCLUSIVE → stop; do not publish
+client/src/            App.tsx, pages/{Repositories,RepositoryAnalysis,AnalysisHistory}.tsx, lib/, services/, types/
+server/src/
+  app.ts, server.ts    Express app (rate limit, CORS, JSON with raw body) and process bootstrap
+  routes/ controllers/ HTTP layer
+  services/            persistence and orchestration (ingestion, analysis, repair job, PR, memory ...)
+  pipeline/            runAnalysisPipeline
+  context/             buildRepositoryContext, formatter, filters
+  agents/ prompts/     bug, security, test-generation, fix, verification agents
+  ai/                  provider interface, three providers, manager, factory
+  analyzers/           repository.analyzer.ts
+  risk/                risk calculator, engine, rules
+  repair/              workspace, patch, branch, retry/
+  execution/           docker.runner.ts
+  github/              REST client, PR service, PR body, webhook signature
+  queue/ workers/      scan and repair queues and workers
+  realtime/            socket.ts
+  rag/                 chunker, lexical embedding
+  security/            token encryption, command policy, untrusted wrapper, static scanner
+  benchmark/           evaluator and CLI
+  test-*.ts            focused scripts (not a test framework)
+server/prisma/         schema.prisma and migrations
+server/benchmarks/     seeded-repo fixture and ground truth
+docker-compose.yml, server/Dockerfile, client/Dockerfile, client/nginx.conf
+bug-test-repo/ security-test-repo/ test-generation-repo/   local fixtures (git-ignored)
 ```
 
-### 5.1 Repair contracts and paths
+## 5. HTTP and event surface
 
-Authoritative paths recorded in the project documents:
-
-```text
-server/src/services/
-server/src/repair/retry/repair.retry.service.ts
-server/src/execution/docker.runner.ts
-server/src/ai/ai.provider.ts
-server/src/ai/ai.provider.factory.ts
-```
-
-Key APIs/contracts:
-
-```ts
-buildRepositoryContext(repositoryPath, repositoryId)
-applyFixResult(repositoryPath, fixResult)
-removeRepairWorkspace(workspace.rootPath)
-```
-
-`repositoryPath` passed to `applyFixResult` must point to the isolated repair workspace, never the user's original working tree.
-
-### 5.2 Retry policy
-
-- Maximum repair attempts: three.
-- Attempt 1 uses the original finding and normal Fix Agent flow.
-- Replanning is used for subsequent attempts after failure evidence exists.
-- The attempt history is represented by `attempts: RetryAttemptResult[]` in the recorded implementation.
-- The Docker test input can carry `REPO_DOCTOR_ATTEMPT` metadata.
-- Insufficient evidence produces `INCONCLUSIVE`, which stops the loop and is not a successful repair.
-
-### 5.3 Verification-gated publication
-
-Only a strictly verified result may continue to branch commit, push, and pull-request creation. The publisher must not:
-
-- Push directly to the default branch.
-- Force-push.
-- Auto-merge.
-- Publish an `FAILED`, `INCONCLUSIVE`, error, or exhausted-retry result as a successful repair.
-- Place a GitHub token in a Docker test container, a clone URL, or ordinary Git command arguments.
-
-A pull request is a proposal for human review, not an automatic change to the target branch.
-
-## 6. Queue and live-progress architecture
-
-The reconciled archive describes:
-
-- A BullMQ repository-scan queue and separate scan worker.
-- A repair queue and separate repair worker.
-- Job-status endpoints scoped to the authenticated user.
-- Queue retry/retention settings and progress callbacks.
-- Queue-event forwarding to authenticated Socket.IO user rooms.
-- REST status lookup/polling as a recovery path if the client misses a live event.
-- GitHub delivery-ID-based deduplication for webhook-enqueued work.
-
-The queue and event architecture needs runtime validation against real Redis/PostgreSQL services. A source-level event handler is not proof of correct reconnection, deduplication, or worker recovery under failure.
-
-## 7. GitHub webhook architecture
-
-The webhook endpoint is recorded as:
-
-```text
-POST /api/github/webhook
-```
-
-The request handler captures the raw JSON body and validates `X-Hub-Signature-256` using HMAC and constant-time comparison before trusting the payload. Supported event scope is limited to `push` and selected `pull_request` actions. The delivery ID is used to deduplicate queued work.
-
-Fork pull requests are intentionally ignored in this version. Do not broaden this behavior until a trust policy for fork code, permissions, and token scope has been designed and tested.
-
-## 8. Data and trust boundaries
-
-| Data | Trust level | Required handling |
+| Method and path | Auth | Purpose |
 |---|---|---|
-| User input and API parameters | Untrusted | Validate and authorize every operation |
-| GitHub webhook body | Untrusted until signature validation | Verify raw-body signature before processing |
-| Repository files and package scripts | Untrusted | Inspect statically; run only in controlled execution boundary |
-| AI output / proposed patch | Untrusted | Parse schema, validate paths/content, then apply in isolated workspace |
-| Test stdout/stderr | Untrusted evidence | Bound size/time and do not treat arbitrary text as proof of success |
-| GitHub access token | Secret | Never log or pass into test container; encrypt at rest before production |
-| Database/AI credentials | Secret | Environment/secret manager only; never mount into untrusted execution |
-| Verification status | Decision evidence | Publish only for explicit verified state |
+| `GET /api/health` | none | liveness message |
+| `POST /api/auth/register`, `POST /api/auth/login` | none, rate limited | account creation, JWT |
+| `GET /api/auth/me` | JWT | current user |
+| `GET /api/github/connect` | JWT | OAuth URL with signed state |
+| `GET /api/github/callback` | state cookie | store GitHub token |
+| `GET /api/github/repositories` | JWT | sync and list repositories |
+| `POST /api/github/webhook` | HMAC signature | enqueue scan for push / same-repo PR |
+| `GET /api/repositories`, `GET /api/repositories/:id`, `DELETE /api/repositories/:id` | JWT | manage repositories |
+| `POST /api/repositories/ingest` | JWT | enqueue scan, returns `202` and `jobId` |
+| `GET /api/repositories/jobs/:jobId` | JWT, owner only | scan job state |
+| `GET /api/repositories/:id/analyses`, `GET /api/repositories/:id/analysis/latest` | JWT | analysis history, findings, risk |
+| `POST /api/repairs` | JWT | enqueue repair for a finding with `testCommand` array |
+| `GET /api/repairs/jobs/:jobId` | JWT, owner only | repair job state |
 
-## 9. Known design limitations
+Socket.IO events (server → client, to room `user:<userId>`): `scan:progress`, `scan:completed`, `scan:failed`, `repair:progress`, `repair:completed`, `repair:failed`.
 
-- The current AI security agent and heuristic scanner do not equal comprehensive SAST, secret scanning, or dependency auditing.
-- Generated test proposals may not run if the target project's dependencies are unavailable in the restricted environment.
-- The runner's isolation boundary must be reviewed against the actual Docker configuration and host environment.
-- OAuth tokens are reported as unencrypted at rest in the supplied archive.
-- Rate limiting, deployment hardening, RAG/repository memory, and a measured benchmark are not evidenced as complete in the supplied archive.
-- The development Compose file is not a production deployment recipe.
+## 6. Analysis flow
+
+1. `POST /api/repositories/ingest` checks ownership and a stored GitHub token, then enqueues a `repository-scan` job (`manual-<uuid>`), or a webhook enqueues `github-<deliveryId>`.
+2. The scan worker creates an `Analysis` row and calls `ingestRepository`: shallow clone of one branch into `os.tmpdir()/repodoctor/<uuid>`, token passed through git environment variables, never in the URL.
+3. `analyzeRepository` builds the snapshot; `saveAnalysis` stores it.
+4. `runAnalysisPipeline(analysisId, repositoryId, repositoryPath)`:
+   1. `buildRepositoryContext(repositoryPath, repositoryId)` (up to 30 JS/TS files of at most 50 KB).
+   2. Repository memory: `indexRepositoryMemory`, `retrieveRepositoryMemory` (6 chunks), appended to the prompt. Failure is logged and skipped.
+   3. `BugDetectionAgent`, then `SecurityAgent` (AI + six regex rules), then `TestGenerationAgent`, then risk evaluation. Bug, security and risk results are persisted. **Generated tests are not persisted.**
+   4. `Analysis.status` moves `RUNNING` → `COMPLETED` or `FAILED`.
+5. The workspace is deleted in a `finally` block.
+
+Provider order is OpenRouter, Groq, Gemini. `ai.config.ts` throws at import if `OPENROUTER_API_KEY` is empty. The repository-context call needs both `repositoryPath` and `repositoryId`. TypeScript imports use `.js` suffixes (for example `import { runDockerTest } from "../execution/docker.runner.js"`).
+
+## 7. Repair flow and invariants
+
+```text
+POST /api/repairs  (analysisId, findingId, testCommand[])
+   → ownership checks → BullMQ autonomous-repair (attempts: 1)
+   → repair worker: shallow clone of Analysis.sourceRef into a disposable workspace
+   → runAutonomousRepair → RepairJob row
+   → runRepairRetryLoop, up to 3 attempts, each in a NEW workspace/branch:
+        FixAgent.generateFix → save FixProposal
+        applyFixResult(workspace.repositoryPath, fixResult)
+        runDockerTest(...) → save DockerTestRun
+        verifyFix(...) → save VerificationResult
+        VERIFIED      → publishVerifiedRepairWithCleanup → PullRequest row; stop
+        INCONCLUSIVE  → stop, no PR
+        FAILED/ERROR  → replan with previous Docker + verification evidence; next attempt
+        exception     → status ERROR; stop
+   → 3rd failure → MAX_RETRIES_REACHED
+```
+
+Contracts used throughout the code: `buildRepositoryContext(repositoryPath, repositoryId)`, `applyFixResult(repositoryPath, fixResult)`, `removeRepairWorkspace(workspace.rootPath)`. `repositoryPath` passed to `applyFixResult` is always the per-attempt workspace.
+
+### 7.1 Publication gate
+
+`publishVerifiedRepair` refuses unless all hold: `status === "VERIFIED"`, `testPassed === true`, `regressionDetected === false`, `confidence >= 0.7`, current branch equals the repair branch and is not the base, and the working tree has changes. It never force-pushes, never pushes the base branch and never merges. See the limitation below: the verdict comes from an LLM.
+
+### 7.2 Data model (Prisma)
+
+`User` → `Repository` → `Analysis` → { `BugFinding`, `SecurityFinding`, `GeneratedTest` (never written by the pipeline), `RiskAssessment`, `FixProposal`, `VerificationResult`, `PullRequest`, `RepairJob` → `RepairJobAttempt` }. Standalone: `DockerTestRun`, `RepairAttempt` (keyed by ids, no foreign keys), `RepositoryMemoryChunk` (→ `Repository`), `SecurityAuditEvent` (never written). `User.githubAccessToken` is plain text.
+
+## 8. Queue, webhook and real-time architecture
+
+- **Queues:** `repository-scan` (3 attempts, exponential back-off from 2 s) and `autonomous-repair` (1 attempt). Both keep completed jobs 24 h (max 2,000) and failed jobs 7 days (max 5,000).
+- **Workers:** `scan.worker.ts` (default concurrency 2) and `repair.worker.ts` (default concurrency 1). Both need `DATABASE_URL`, Redis settings and the git binary; the repair worker also needs a reachable Docker daemon.
+- **Webhook:** signature checked over the raw body before the payload is parsed; supported events are `ping`, `push` (branch refs) and `pull_request` (`opened`, `reopened`, `synchronize`, `ready_for_review`) from the same repository. Fork PRs are deliberately ignored. A redelivery reuses the job id `github-<deliveryId>`.
+- **Real-time:** the API process runs a `QueueEvents` listener per queue and forwards events to the owner's room. REST job-status endpoints are the recovery path; the client uses them for scans but not for repairs. The API process requires Redis to start.
+
+## 9. Trust boundaries and known design limitations
+
+| Data | Trust | Handling in the code |
+|---|---|---|
+| API input | untrusted | field validation in controllers; ownership filters on every query |
+| Webhook body | untrusted until HMAC passes | raw-body HMAC, constant-time compare |
+| Repository files, scripts | untrusted | read statically; tests run only inside Docker |
+| AI output | untrusted | JSON-schema validation; patch path/range/original-code checks |
+| Test output | untrusted evidence | truncated at 1,000,000 characters; fed to the verification model |
+| GitHub token | secret | passed via git environment; **stored unencrypted**; not given to Docker |
+| Retrieved memory | untrusted | prefixed with an untrusted-data warning |
+
+Limitations that affect the architecture:
+
+1. **Verification is model-driven.** No code path independently requires the Docker run to have exited 0 before accepting `VERIFIED`.
+2. **Test dependencies.** Workspaces contain no `node_modules` and Docker has no network, so repositories whose tests need installed packages will fail or be inconclusive.
+3. **Context selection** is the first 30 JS/TS files in traversal order, not finding-relevant files; the Fix Agent does not receive retrieved memory.
+4. **Memory** is lexical retrieval, rebuilt per scan, not filtered by branch/commit.
+5. **Security modules not connected:** token encryption, the strict command policy, the untrusted-context wrapper and the audit-event service. See [Operations and security §3](OPERATIONS_SECURITY.md#3-security-control-status).
+6. **Deployment:** Compose is development-oriented and, as written, would not start a working stack (listed in [Operations §6](OPERATIONS_SECURITY.md#6-docker-compose-reality-check)).
+7. `express-rate-limit` was missing from `server/package.json`; it was declared on 11 October 2026 (build still not run).
 
 ## 10. Architecture acceptance criteria
 
-Before claiming the architecture is production-ready, demonstrate all of the following in a clean environment:
-
-- API, scan worker, repair worker, PostgreSQL, Redis, and client start independently and health-check correctly.
-- A scan request is persisted/enqueued exactly once or deduplicated according to policy.
-- The analysis pipeline receives the correct repository ID and persists findings.
-- A repair uses a disposable workspace and cannot mutate the source checkout.
-- Test execution cannot access network or application secrets and obeys resource/time limits.
-- Failed/inconclusive verification never creates a PR.
-- A verified repair creates a branch/PR in a disposable test repository without merging it.
-- Queue failures and missed live events can be recovered through persisted job status.
+Before calling the architecture production-ready, demonstrate in a clean environment that: API, both workers, PostgreSQL, Redis and the client start and report health; a scan is enqueued once and de-duplicated by delivery id; findings are persisted; a repair uses a disposable workspace and cannot mutate the source clone; the test container has no network, secrets or excess resources; failed and inconclusive verification never create a PR; a verified repair opens an unmerged PR in a disposable repository; missed socket events can be recovered through the status endpoints.

@@ -1,75 +1,30 @@
-# React + TypeScript + Vite
+# RepoDoctor AI — Client
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React 19 + TypeScript + Vite single-page app for [RepoDoctor AI](../README.md). This file replaces the unmodified Vite template text that used to be here. Nothing below was executed during the documentation audit (no `npm install` was run).
 
-Currently, two official plugins are available:
+## Scripts (`package.json`)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Vite dev server (default `http://localhost:5173`) |
+| `npm run build` | `tsc -b && vite build` |
+| `npm run lint` | `eslint .` |
+| `npm run preview` | serve the production build |
 
-## React Compiler
+There are no client tests.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Configuration
 
-## Expanding the ESLint configuration
+`VITE_API_URL` (see `.env.example`) is the API base URL, default `http://localhost:5000/api`. The Docker build (`client/Dockerfile`) sets it to `/api` and serves the build with nginx, which proxies `/api/` to `http://server:4000/api/`. The socket connection is made to the same origin with `/api` removed.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## What the UI does (source inspection)
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- `src/App.tsx` — register/login form, token in `localStorage`, "Connect GitHub" button, logout.
+- `src/pages/Repositories.tsx` — repository list, scan trigger, job polling through `GET /repositories/jobs/:jobId`, Socket.IO `scan:*` events, repository deletion.
+- `src/pages/RepositoryAnalysis.tsx` — latest analysis, findings and risk, a test-command field (default `npm test`), repair trigger (`POST /repairs`), Socket.IO `repair:*` events, pull-request link when one exists, explicit message when no PR was created.
+- `src/pages/AnalysisHistory.tsx` — list of past analyses.
+- `src/lib/api.ts`, `src/lib/auth.ts`, `src/services/repository.service.ts`, `src/types/repository.ts` — axios instance, auth header, API calls, types.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Known gaps
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
-```
-
-You can also install [eslint-plugin-react-x](https://npmx.dev/package/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://npmx.dev/package/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-
-```
+No router, no tests, no accessibility review, no REST polling fallback for repair status, token kept in `localStorage`, template images (`src/assets/`) are not product screenshots.
