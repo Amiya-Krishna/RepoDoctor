@@ -20,8 +20,22 @@ if (Number.isInteger(trustProxyHops) && trustProxyHops > 0) {
 
 // Order matters: CORS first (so preflight requests are not rate limited and
 // error responses carry CORS headers), then rate limiting, then body parsing.
+// FRONTEND_URL is the exact allowed origin. Outside production, any
+// localhost / 127.0.0.1 port is also accepted so Vite falling back to 5174,
+// or opening the app via 127.0.0.1, does not break login/register with a CORS
+// "Network Error".
+const allowedOrigin = process.env.FRONTEND_URL ?? "http://localhost:5173";
+const isLocalOrigin = (origin: string) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 app.use(cors({
-  origin: process.env.FRONTEND_URL ?? "http://localhost:5173",
+  origin: (origin, callback) => {
+    callback(
+      null,
+      !origin ||
+        origin === allowedOrigin ||
+        (process.env.NODE_ENV !== "production" && isLocalOrigin(origin)),
+    );
+  },
   credentials: true,
 }));
 app.use("/api", apiRateLimiter);
