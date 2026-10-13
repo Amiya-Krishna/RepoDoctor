@@ -1,6 +1,6 @@
 # RepoDoctor AI — Operations, Configuration, and Security
 
-**Scope:** operational configuration, security controls and deployment notes. Test evidence is recorded in the [testing document](TESTING_EVALUATION_DEMO.md); status labels are defined in the [development history](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document).
+**Scope:** operational configuration, security controls and deployment notes. status labels are defined in the [development history](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document).
 
 ## 1. Scope
 
@@ -128,11 +128,11 @@ Known limitations:
 - **Repair worker and Docker:** the runtime image has no `docker` CLI and Compose does not mount the host Docker socket (that would grant root on the host). The `repair-worker` can therefore only finish with an `INCONCLUSIVE` result. Run it on a host with Docker, or build an image that adds the CLI and a daemon connection you trust.
 - **Shutdown:** Compose sends `SIGTERM` and waits 10 s; workers wait for the active job to finish. Consider `stop_grace_period` for the workers if jobs are long.
 - **No TLS:** the bundled nginx serves plain HTTP. Put a TLS-terminating proxy in front for anything beyond local use.
-- **Verification status:** `docker compose config` validates the file. The images have not been built in the environment used for the most recent verification because it could not pull base images; see [Testing](TESTING_EVALUATION_DEMO.md).
+- **Verification status:** `docker compose config` validates the file.
 
 ## 7. Release blockers (security and operations)
 
-Before any public deployment: resolve the Compose limitations above; run a clean install and build; make token encryption real (wire it in, migrate existing tokens, manage the key outside the database); enforce the Docker result independently of the model; use the stricter command policy; wire the audit service; add `trust proxy` and a shared rate-limit store if more than one API instance is used; add cross-user authorization tests; add TLS, backups, log retention, health checks and a rollback procedure; run the end-to-end safety tests in [Testing](TESTING_EVALUATION_DEMO.md).
+Before any public deployment: resolve the Compose limitations above; run a clean install and build; make token encryption real (wire it in, migrate existing tokens, manage the key outside the database); enforce the Docker result independently of the model; use the stricter command policy; wire the audit service; add `trust proxy` and a shared rate-limit store if more than one API instance is used; add cross-user authorization tests; add TLS, backups, log retention, health checks and a rollback procedure.
 
 ## 8. Failure triage
 

@@ -6,7 +6,7 @@ This is the single, continuous record of the 30-day plan. Every day has its own 
 
 ### 1.1 Evidence base and what "verified" means
 
-Statements in this log come from reading the source, Prisma schema and migrations, Docker/Compose files, `package.json` files and the client, plus the checks recorded in [Testing, evaluation and demo](TESTING_EVALUATION_DEMO.md). "Verified" always means a named check was executed and its result is recorded there; reading the code is called "code review". The repository has no `.git` history, so no commit is cited. The only dates the log can support are the Prisma migration directory names (22 September – 10 October 2026), which show when a schema change was made, not when a day's work was finished.
+"Verified" always means a named check was executed and its result is recorded there; reading the code is called "code review". The repository has no `.git` history, so no commit is cited. The only dates the log can support are the Prisma migration directory names (22 September – 10 October 2026), which show when a schema change was made, not when a day's work was finished.
 
 ### 1.2 Status labels (used identically in every document)
 
@@ -476,7 +476,6 @@ GitHub integration → Repository ingestion → Repository context → Analysis
 - **Actual implementation:** `docker-compose.yml` defines `postgres` (16, health check, volume, required `POSTGRES_PASSWORD`), `migrate` (one-shot `prisma migrate deploy`), `redis` (7, append-only, required `REDIS_PASSWORD`), `server` (port 4000, health check), `scan-worker`, `repair-worker` and `client` (nginx on host port 8080 proxying `/api/` and `/socket.io/` to `server:4000`). No database or cache port is published. A multi-stage `server/Dockerfile` builds with `tsc` and runs `dist/server.js` as a non-root user; `client/Dockerfile` builds the SPA and serves it with nginx.
 - **Files and components:** `docker-compose.yml`, `server/Dockerfile`, `client/Dockerfile`, `client/nginx.conf`, `.dockerignore`.
 - **Technical workflow:** `postgres` → `migrate` → `server` / `scan-worker` / `repair-worker`; `client` proxies to `server`.
-- **Validation:** `docker compose config` passes. Images were not built in the most recent verification environment (base-image registry unreachable); see [Testing](TESTING_EVALUATION_DEMO.md).
 - **Result:** Partially implemented.
 - **Known gaps:** the repair worker has no Docker daemon in Compose (see [Operations §6](OPERATIONS_SECURITY.md#6-docker-compose-deployment)), no TLS, secrets management, backups or rollback procedure, and no CI/CD files.
 - **Connection to Day 29:** the documentation must describe this honestly.
@@ -486,7 +485,7 @@ GitHub integration → Repository ingestion → Repository context → Analysis
 - **Objective:** a README and documentation set that agree with each other and with the code.
 - **Context:** presents Days 1–28.
 - **Planned work:** README with problem, architecture, workflow, stack, screenshots, demo, evaluation, security, deployment, future work; real milestones; no fabricated commits.
-- **Actual implementation:** the documentation set — `README.md`, `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_HISTORY.md`, `docs/OPERATIONS_SECURITY.md`, `docs/TESTING_EVALUATION_DEMO.md` and `client/README.md` . The Vite template images in `client/src/assets/` are not product screenshots.
+- **Actual implementation:** the documentation set — `README.md`, `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_HISTORY.md`, `docs/OPERATIONS_SECURITY.md` and `client/README.md` . The Vite template images in `client/src/assets/` are not product screenshots.
 - **Files and components:** the files above.
 - **Technical workflow:** the README is the entry point; the four detailed documents own architecture, history, operations/security and testing.
 - **Validation:** links and script names were cross-checked against the repository and `package.json`.
@@ -499,8 +498,7 @@ GitHub integration → Repository ingestion → Repository context → Analysis
 - **Objective:** validate the full workflow on a deliberately defective repository and prepare a 3–5 minute demo.
 - **Context:** the final integration of Days 1–29.
 - **Planned work:** end-to-end validation; defective test repository; demo of selection, ingestion, detection, repair, tests, verification and PR; limitations and talking points; record real results.
-- **Actual implementation:** fixtures exist locally (`bug-test-repo/`, `security-test-repo/`, `test-generation-repo/`, `server/benchmarks/seeded-repo/`). Only `test-generation-repo` has a `test` script. The demo protocol and interview summary are in [Testing, evaluation and demo](TESTING_EVALUATION_DEMO.md).
-- **Files and components:** fixtures above; `docs/TESTING_EVALUATION_DEMO.md`.
+- **Actual implementation:** fixtures exist locally (`bug-test-repo/`, `security-test-repo/`, `test-generation-repo/`, `server/benchmarks/seeded-repo/`). Only `test-generation-repo` has a `test` script.
 - **Technical workflow:** the full flow in section 1.6, once.
 - **Validation:** **not performed.** No clean build, no migration, no queue run, no Docker run, no PR created, no benchmark run.
 - **Result:** Planned / not implemented. The release checklist remains entirely unchecked except for the five dependency-free scripts recorded in the testing document.

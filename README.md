@@ -56,7 +56,7 @@ Behaviour: invalid input returns `400`; an existing email (any letter case, incl
 
 ## Implementation status
 
-Status labels are defined in the [development history](docs/DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document). "Verified" means a named check was executed; see [Testing](docs/TESTING_EVALUATION_DEMO.md).
+Status labels are defined in the [development history](docs/DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document).
 
 | Capability | Status |
 |---|---|
@@ -162,7 +162,7 @@ docker compose config -q
 npm run test:e2e                     # E2E_BASE_URL overrides the client URL (default http://localhost:5173)
 ```
 
-Server `test:*` scripts are standalone programs, not a test framework; which ones need AI keys, repository paths or existing database rows is listed in [Testing §2](docs/TESTING_EVALUATION_DEMO.md#2-test-inventory). Step-by-step manual checks are in the [manual testing guide](docs/MANUAL_TESTING_GUIDE.md).
+Step-by-step manual checks are in the [manual testing guide](docs/MANUAL_TESTING_GUIDE.md).
 
 ## Security boundaries
 
@@ -185,7 +185,7 @@ Gaps (see [Operations §3](docs/OPERATIONS_SECURITY.md#3-security-control-status
 
 ## Benchmark
 
-An evaluator, a CLI and a five-case seeded fixture exist, but **no benchmark has been run**, so there are no precision, recall or repair-rate results. `server/benchmarks/seeded-repo/run-results.example.json` is hand-written illustration. Method and the empty results table: [Testing §6](docs/TESTING_EVALUATION_DEMO.md#6-seeded-defect-benchmark).
+An evaluator, a CLI and a five-case seeded fixture exist, but **no benchmark has been run**, so there are no precision, recall or repair-rate results. `server/benchmarks/seeded-repo/run-results.example.json` is hand-written illustration. 
 
 ## Known limitations
 
@@ -203,8 +203,7 @@ An evaluator, a CLI and a five-case seeded fixture exist, but **no benchmark has
 
 1. [Architecture](docs/ARCHITECTURE.md) — reference diagram, stack, API surface, flows, trust boundaries.
 2. [Operations and security](docs/OPERATIONS_SECURITY.md) — environment variables, security controls, Compose deployment, failure triage.
-3. [Testing, evaluation and demo](docs/TESTING_EVALUATION_DEMO.md) — script inventory, benchmark method, demo protocol, release checklist.
-4. [Manual testing guide](docs/MANUAL_TESTING_GUIDE.md) — setup and functional test cases.
-5. [Development history](docs/DEVELOPMENT_HISTORY.md) — day-by-day development log of the 30-day plan.
-6. [Server](server/README.md) and [client](client/README.md) notes.
+3. [Manual testing guide](docs/MANUAL_TESTING_GUIDE.md) — setup and functional test cases.
+4. [Development history](docs/DEVELOPMENT_HISTORY.md) — day-by-day development log of the 30-day plan.
+5. [Server](server/README.md) and [client](client/README.md) notes.
 

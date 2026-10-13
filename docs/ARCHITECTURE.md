@@ -1,6 +1,6 @@
 # RepoDoctor AI — Architecture and Design
 
-**Scope:** this document describes the implemented design. Status labels are defined in [Development history §1.2](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document). Day references (for example "Day 17") point to sections of the [Day 1–30 history](DEVELOPMENT_HISTORY.md). Test status for each area is in [Testing](TESTING_EVALUATION_DEMO.md).
+**Scope:** this document describes the implemented design. Status labels are defined in [Development history §1.2](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document). Day references (for example "Day 17") point to sections of the [Day 1–30 history](DEVELOPMENT_HISTORY.md).
 
 ## 1. System goals
 

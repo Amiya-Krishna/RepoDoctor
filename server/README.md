@@ -20,7 +20,7 @@ Express 5 + TypeScript (ESM/NodeNext) backend for [RepoDoctor AI](../README.md):
 | `npm run worker` | scan worker (`src/workers/scan.worker.ts`) |
 | `npm run repair-worker` | repair worker (`src/workers/repair.worker.ts`; needs git and a Docker daemon) |
 | `npm run prisma:generate`, `prisma:migrate`, `prisma:deploy` | Prisma client / dev migration / deploy migrations |
-| `npm run test:*` | standalone `tsx` scripts, not a test framework; inventory and requirements in [Testing](../docs/TESTING_EVALUATION_DEMO.md#2-test-inventory) |
+| `npm run test:*` | standalone `tsx` scripts, not a test framework |
 | `npm run benchmark:evaluate -- <ground-truth.json> <run-results.json>` | compute benchmark metrics from two JSON files |
 
 ## Setup

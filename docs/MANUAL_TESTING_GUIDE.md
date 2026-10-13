@@ -1,6 +1,6 @@
 # RepoDoctor AI — Manual Testing and Execution Guide
 
-Companion to [Testing](TESTING_EVALUATION_DEMO.md). Every command, route, port, table and button label below was checked against the repository (`server/package.json`, `client/package.json`, `server/src/routes/*`, `server/prisma/schema.prisma`, `docker-compose.yml`, `client/src/pages/*`). Nothing here contains secrets; replace `<placeholders>` with your own values.
+Every command, route, port, table and button label below was checked against the repository (`server/package.json`, `client/package.json`, `server/src/routes/*`, `server/prisma/schema.prisma`, `docker-compose.yml`, `client/src/pages/*`). Nothing here contains secrets; replace `<placeholders>` with your own values.
 
 **How to read the status tags.**
 
