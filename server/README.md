@@ -2,13 +2,14 @@
 
 Express 5 + TypeScript (ESM/NodeNext) backend for [RepoDoctor AI](../README.md): REST API, Socket.IO gateway, BullMQ workers, AI agents, repair loop and GitHub integration. Database is **PostgreSQL via Prisma** (not MongoDB).
 
-> Status: written from source inspection (11 Oct 2026). Only `test:risk-engine`, `test:webhook-signature`, `test:static-security`, `test:benchmark` and `test:security` were run. No build, migration, queue, Docker, AI or GitHub run has been done. Labels follow the [development history](../docs/DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document).
+> Status labels follow the [development history](../docs/DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document); 
 
-## Known blockers (read first)
+## Notes
 
-- `express-rate-limit` was added to `package.json` and the lockfile on 11 Oct 2026; no full install or build has been run yet.
-- `Dockerfile` was de-duplicated, its `CMD` now runs `dist/server.js`, and the production `npm ci` uses `--ignore-scripts` (so `prisma generate` doesn't run before `prisma/` is copied); no image has been built. Remaining Compose problems: [Operations §6](../docs/OPERATIONS_SECURITY.md#6-docker-compose-reality-check).
-- `src/ai/ai.config.ts` throws if `OPENROUTER_API_KEY` is empty, even if Groq/Gemini are configured.
+- `src/ai/ai.config.ts` requires at least one provider key (`OPENROUTER_API_KEY`, `GROQ_API_KEY` or `GEMINI_API_KEY`) for AI features.
+- `npm run test:auth` exercises registration and login against the real app and database and cleans up its own users.
+- The auth rate limit (10 failed attempts per 15 minutes) can be raised for automated runs with `AUTH_RATE_LIMIT_MAX`.
+- The Docker image and Compose stack are described in [Operations §6](../docs/OPERATIONS_SECURITY.md#6-docker-compose-deployment).
 
 ## Scripts
 
@@ -19,7 +20,7 @@ Express 5 + TypeScript (ESM/NodeNext) backend for [RepoDoctor AI](../README.md):
 | `npm run worker` | scan worker (`src/workers/scan.worker.ts`) |
 | `npm run repair-worker` | repair worker (`src/workers/repair.worker.ts`; needs git and a Docker daemon) |
 | `npm run prisma:generate`, `prisma:migrate`, `prisma:deploy` | Prisma client / dev migration / deploy migrations |
-| `npm run test:*` | standalone `tsx` scripts, not a test framework; inventory and requirements in [Testing](../docs/TESTING_EVALUATION_DEMO.md#3-test-and-script-inventory-from-packagejson) |
+| `npm run test:*` | standalone `tsx` scripts, not a test framework; inventory and requirements in [Testing](../docs/TESTING_EVALUATION_DEMO.md#2-test-inventory) |
 | `npm run benchmark:evaluate -- <ground-truth.json> <run-results.json>` | compute benchmark metrics from two JSON files |
 
 ## Setup
@@ -75,4 +76,4 @@ benchmarks/seeded-repo/    5-case fixture and ground truth (no measured results)
 
 ## Safety design and gaps
 
-Fixes are applied only in disposable workspaces; tests run in Docker with `--network none`, dropped capabilities, resource limits and a 120 s timeout; at most 3 attempts; PRs only for a verified result; no merge. Gaps: the verification verdict comes from an LLM and the Docker exit code is not enforced separately; GitHub tokens are stored unencrypted (encryption module exists but is unused); the strict command policy, untrusted-context wrapper and audit service are not connected; generated tests are never saved. Full table: [Operations §3](../docs/OPERATIONS_SECURITY.md#3-security-control-status).
+Fixes are applied only in disposable workspaces; tests run in Docker with `--network none`, dropped capabilities, resource limits and a 120 s timeout; at most 3 attempts; PRs only for a verified result; no merge. Gaps: the verification verdict comes from an LLM and the Docker exit code is not enforced separately; GitHub tokens are encrypted only when `GITHUB_TOKEN_ENCRYPTION_KEY` is set; the strict command policy, untrusted-context wrapper and audit service are not connected; generated tests are never saved. Full table: [Operations §3](../docs/OPERATIONS_SECURITY.md#3-security-control-status).

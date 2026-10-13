@@ -70,6 +70,14 @@ export const register = async (req: Request, res: Response) => {
       },
     });
   } catch (error) {
+    // Two concurrent registrations with the same email can both pass the
+    // findUnique check; the unique index then rejects the second one.
+    if ((error as { code?: unknown } | null)?.code === "P2002") {
+      return res.status(409).json({
+        message: "User already exists",
+      });
+    }
+
     console.error("Register error:", error);
 
     return res.status(500).json({

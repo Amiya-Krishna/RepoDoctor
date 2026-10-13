@@ -42,7 +42,10 @@ export const protect = (
 
     next();
   } catch (error) {
-    console.error("Auth middleware error:", error);
+    // Expired / malformed tokens are routine client errors, not server faults.
+    if (!(error instanceof jwt.JsonWebTokenError)) {
+      console.error("Auth middleware error:", error);
+    }
 
     return res.status(401).json({
       message: "Invalid or expired token",

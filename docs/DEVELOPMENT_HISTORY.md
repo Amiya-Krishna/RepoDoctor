@@ -6,13 +6,7 @@ This is the single, continuous record of the 30-day plan. Every day has its own 
 
 ### 1.1 Evidence base and what "verified" means
 
-This revision was produced by auditing the supplied archive (`RepoDoctor.zip`, last file timestamps 10–11 October 2026). The audit method was:
-
-- **Static inspection** of the source, Prisma schema and migrations, Docker/Compose files, `package.json` files and the client.
-- **Execution of five dependency-free scripts** in a scratch copy of the archive on 11 October 2026 (Node 22.22.0, `tsx`, no `npm install`, no Docker, no Redis, no PostgreSQL, no network). Results are in [Testing, evaluation and demo](TESTING_EVALUATION_DEMO.md).
-- **No** clean install, TypeScript build, Prisma migration, queue run, Docker run, live AI call, live GitHub call or browser run was performed. The archive contains no `.git` directory, so commit history is unavailable and no commit is cited anywhere.
-
-The only dates this document can support are the Prisma migration directory names (22 September – 10 October 2026). They are quoted as evidence of when a schema change was made, not as proof that a day's work was finished on a particular date.
+Statements in this log come from reading the source, Prisma schema and migrations, Docker/Compose files, `package.json` files and the client, plus the checks recorded in [Testing, evaluation and demo](TESTING_EVALUATION_DEMO.md). "Verified" always means a named check was executed and its result is recorded there; reading the code is called "code review". The repository has no `.git` history, so no commit is cited. The only dates the log can support are the Prisma migration directory names (22 September – 10 October 2026), which show when a schema change was made, not when a day's work was finished.
 
 ### 1.2 Status labels (used identically in every document)
 
@@ -37,7 +31,7 @@ The previous version of this file was a single table and a plan for Days 25–30
 | Day 25 (RAG/memory) "not evidenced". | `server/src/rag/`, `server/src/services/repository-memory.service.ts`, the `RepositoryMemoryChunk` model, migration `20261010190000_repository_memory_chunks` and a call in `analysis.pipeline.ts` exist. It is **lexical hashed-vector retrieval**, not neural-embedding RAG (see Day 25). |
 | Day 26 benchmark "not evidenced". | An evaluator, a CLI and a 5-case seeded fixture exist. **No measured results exist** (see Day 26). |
 | Day 27: token encryption, rate limiting, audit logging "gaps". | Token encryption module, rate-limit middleware, a command policy, an untrusted-context helper and an audit-event table all exist, but several are **not wired in** (see Day 27). |
-| Day 28: Compose "has hard-coded credentials and publishes DB/cache ports". | The current `docker-compose.yml` requires `POSTGRES_PASSWORD` and `REDIS_PASSWORD`, publishes no database/cache ports and uses an internal network. It has *other* defects (see Day 28). |
+| Day 28: Compose "has hard-coded credentials and publishes DB/cache ports". | The current `docker-compose.yml` requires `POSTGRES_PASSWORD` and `REDIS_PASSWORD` and publishes no database/cache ports. Remaining limitations are in Day 28. |
 | Days 1–24 "present". | Several days carry caveats not previously recorded, e.g. generated tests are never persisted by the pipeline (Day 12) and `express-rate-limit` was imported but not declared in `package.json` (Day 27; declared on 11 October 2026). |
 
 ### 1.4 Summary table
@@ -479,20 +473,12 @@ GitHub integration → Repository ingestion → Repository context → Analysis
 - **Objective:** a reproducible deployment of frontend, API, database, Redis/BullMQ, workers and isolated test execution.
 - **Context:** packages Days 1–27.
 - **Planned work:** Dockerize; document variables, ports, health checks, steps; separate development from production; document AWS only if performed.
-- **Actual implementation:** `docker-compose.yml` defines `postgres` (16, health check, volume, required `POSTGRES_PASSWORD`), `migrate` (one-shot `prisma migrate deploy`), `redis` (7, append-only, required `REDIS_PASSWORD`), `server`, `worker` and `client` (nginx on host port 8080 proxying `/api/` to `server:4000`). The `backend` network is `internal: true`; no database or cache port is published. `client/Dockerfile` and `nginx.conf` build and serve the SPA. A multi-stage `server/Dockerfile` exists. The unreferenced older Dockerfiles under `docker/` were removed on 11 October 2026. No AWS configuration exists.
+- **Actual implementation:** `docker-compose.yml` defines `postgres` (16, health check, volume, required `POSTGRES_PASSWORD`), `migrate` (one-shot `prisma migrate deploy`), `redis` (7, append-only, required `REDIS_PASSWORD`), `server` (port 4000, health check), `scan-worker`, `repair-worker` and `client` (nginx on host port 8080 proxying `/api/` and `/socket.io/` to `server:4000`). No database or cache port is published. A multi-stage `server/Dockerfile` builds with `tsc` and runs `dist/server.js` as a non-root user; `client/Dockerfile` builds the SPA and serves it with nginx.
 - **Files and components:** `docker-compose.yml`, `server/Dockerfile`, `client/Dockerfile`, `client/nginx.conf`, `.dockerignore`.
-- **Technical workflow:** `migrate` → `server`/`worker`; `client` proxies to `server`.
-- **Validation:** nothing built or started (Docker unavailable).
-- **Result:** Blocked or failing as configured. Defects found by static inspection:
-  1. *(Fixed 11 Oct 2026)* `server/Dockerfile` ended with `CMD ["node", "dist/index.js"]` although `tsc` emits `dist/server.js`, and contained its content twice; it is now de-duplicated and runs `dist/server.js`. The production stage's `npm ci --omit=dev` now uses `--ignore-scripts` so `postinstall` (`prisma generate`) does not run before `prisma/` is copied; the generated client is copied from the build stage. Untested: no image was built.
-  2. The server listens on `PORT` (default 5000; `.env.example` sets 5000) while Compose and nginx use 4000.
-  3. Compose sets `REDIS_URL`, but the code reads `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`; `.env.example` has `REDIS_HOST=127.0.0.1`, which is wrong inside a container.
-  4. Only the **repair** worker is defined (service name `worker`); there is no scan-worker service, so queued scans are never processed under Compose.
-  5. `worker` is attached only to the internal `backend` network, so it cannot reach GitHub or AI providers.
-  6. The production image installs no `git`, and no Docker CLI/daemon access is provided, but the workers need both.
-  7. *(Fixed 11 Oct 2026)* `express-rate-limit` was missing from the dependency manifest (Day 27).
-  8. No health checks for `server`, `worker` or `client`; no CI/CD files exist.
-- **Known gaps:** the above, plus TLS, secrets management, backups and a rollback procedure.
+- **Technical workflow:** `postgres` → `migrate` → `server` / `scan-worker` / `repair-worker`; `client` proxies to `server`.
+- **Validation:** `docker compose config` passes. Images were not built in the most recent verification environment (base-image registry unreachable); see [Testing](TESTING_EVALUATION_DEMO.md).
+- **Result:** Partially implemented.
+- **Known gaps:** the repair worker has no Docker daemon in Compose (see [Operations §6](OPERATIONS_SECURITY.md#6-docker-compose-deployment)), no TLS, secrets management, backups or rollback procedure, and no CI/CD files.
 - **Connection to Day 29:** the documentation must describe this honestly.
 
 ### Day 29 — Resume and GitHub polish
@@ -500,10 +486,10 @@ GitHub integration → Repository ingestion → Repository context → Analysis
 - **Objective:** a README and documentation set that agree with each other and with the code.
 - **Context:** presents Days 1–28.
 - **Planned work:** README with problem, architecture, workflow, stack, screenshots, demo, evaluation, security, deployment, future work; real milestones; no fabricated commits.
-- **Actual implementation:** this documentation set — `README.md`, `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_HISTORY.md`, `docs/OPERATIONS_SECURITY.md`, `docs/TESTING_EVALUATION_DEMO.md` and `client/README.md` (replacing the unmodified Vite template text). The Vite template images in `client/src/assets/` are not product screenshots.
+- **Actual implementation:** the documentation set — `README.md`, `docs/ARCHITECTURE.md`, `docs/DEVELOPMENT_HISTORY.md`, `docs/OPERATIONS_SECURITY.md`, `docs/TESTING_EVALUATION_DEMO.md` and `client/README.md` . The Vite template images in `client/src/assets/` are not product screenshots.
 - **Files and components:** the files above.
 - **Technical workflow:** the README is the entry point; the four detailed documents own architecture, history, operations/security and testing.
-- **Validation:** cross-document checks listed in the final report of this revision (day order, links, scripts versus `package.json`).
+- **Validation:** links and script names were cross-checked against the repository and `package.json`.
 - **Result:** Partially implemented.
 - **Known gaps:** no real screenshots, no demo recording or URL, no commit history, no `LICENSE` file (`server/package.json` declares ISC; the repository licence is not established).
 - **Connection to Day 30:** documentation is only credible after a real run.

@@ -1,8 +1,8 @@
 # RepoDoctor AI — Client
 
-React 19 + TypeScript + Vite single-page app for [RepoDoctor AI](../README.md). This file replaces the unmodified Vite template text that used to be here. Nothing below was executed during the documentation audit (no `npm install` was run).
+React 19 + TypeScript + Vite single-page app for [RepoDoctor AI](../README.md).
 
-## Scripts (`package.json`)
+## Scripts
 
 | Command | Purpose |
 |---|---|
@@ -10,21 +10,19 @@ React 19 + TypeScript + Vite single-page app for [RepoDoctor AI](../README.md). 
 | `npm run build` | `tsc -b && vite build` |
 | `npm run lint` | `eslint .` |
 | `npm run preview` | serve the production build |
+| `npm run test:e2e` | Playwright browser tests for registration/login (see below) |
 
-There are no client tests.
+There are no unit tests for the client. Registration and login are covered by Playwright browser tests in `e2e/auth.spec.ts`: `npm run test:e2e` against a running API and client (first time: `npx playwright install chromium`; set `E2E_BASE_URL` if the client is not on `http://localhost:5173`, and `PLAYWRIGHT_CHROMIUM_PATH` to use an existing Chromium). Each run registers a unique `rd_e2e_<timestamp>@example.test` user and never touches existing accounts. Point the API at a Neon branch, not your main database.
 
 ## Configuration
 
-`VITE_API_URL` (see `.env.example`) is the API base URL, default `http://localhost:5000/api`. The Docker build (`client/Dockerfile`) sets it to `/api` and serves the build with nginx, which proxies `/api/` to `http://server:4000/api/`. The socket connection is made to the same origin with `/api` removed.
+`VITE_API_URL` is the API base URL, default `http://localhost:5000/api`. The Docker build (`client/Dockerfile`) sets it to `/api` and serves the build with nginx, which proxies `/api/` and `/socket.io/` to `http://server:4000`. The Socket.IO connection uses the same origin with `/api` removed.
 
-## What the UI does (source inspection)
+## What the UI does
 
-- `src/App.tsx` — register/login form, token in `localStorage`, "Connect GitHub" button, logout.
-- `src/pages/Repositories.tsx` — repository list, scan trigger, job polling through `GET /repositories/jobs/:jobId`, Socket.IO `scan:*` events, repository deletion.
-- `src/pages/RepositoryAnalysis.tsx` — latest analysis, findings and risk, a test-command field (default `npm test`), repair trigger (`POST /repairs`), Socket.IO `repair:*` events, pull-request link when one exists, explicit message when no PR was created.
-- `src/pages/AnalysisHistory.tsx` — list of past analyses.
-- `src/lib/api.ts`, `src/lib/auth.ts`, `src/services/repository.service.ts`, `src/types/repository.ts` — axios instance, auth header, API calls, types.
+- **Authentication** (`src/components/AuthForm.tsx`): login / register form with labelled fields, inline validation that mirrors the server rules, a show/hide password toggle, a disabled submit while a request is in flight, and server error messages. The JWT is stored in `localStorage`.
+- **Session handling** (`src/App.tsx`, `src/lib/api.ts`): a stored token is validated with `GET /auth/me` on load; any `401` on an authenticated request clears the token and returns to the login form with a notice.
+- **Repositories** (`src/pages/Repositories.tsx`): connect GitHub, refresh and list repositories, queue scans, show live scan progress over Socket.IO, view the latest analysis and history, remove a repository (with confirmation). A user without a GitHub connection sees a prompt to connect instead of an error.
+- **Analysis views** (`src/pages/RepositoryAnalysis.tsx`, `AnalysisHistory.tsx`): findings, risk and history for a repository.
 
-## Known gaps
-
-No router, no tests, no accessibility review, no REST polling fallback for repair status, token kept in `localStorage`, template images (`src/assets/`) are not product screenshots.
+Styling is a single stylesheet (`src/index.css`) with light and dark themes and a responsive layout.

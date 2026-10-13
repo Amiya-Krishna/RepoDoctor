@@ -1,113 +1,112 @@
-import { useState, type FormEvent } from "react";
-import { api, getErrorMessage } from "./lib/api";
+import { useCallback, useEffect, useState } from "react";
+import axios from "axios";
+import AuthForm from "./components/AuthForm";
+import { AUTH_EXPIRED_EVENT, api, getErrorMessage } from "./lib/api";
 import Repositories from "./pages/Repositories";
 
+type Session = "checking" | "anonymous" | "authenticated";
+
 function App() {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [session, setSession] = useState<Session>(
+    localStorage.getItem("token") ? "checking" : "anonymous",
+  );
+  const [userName, setUserName] = useState("");
+  const [notice, setNotice] = useState("");
   const [message, setMessage] = useState("");
-  const [isRegister, setIsRegister] = useState(false);
-  const [loggedIn, setLoggedIn] = useState(!!localStorage.getItem("token"));
 
-  const handleAuth = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const endSession = useCallback((text: string) => {
+    localStorage.removeItem("token");
+    setUserName("");
     setMessage("");
+    setNotice(text);
+    setSession("anonymous");
+  }, []);
 
-    try {
-      const endpoint = isRegister ? "/auth/register" : "/auth/login";
-      const payload = isRegister ? { name, email, password } : { email, password };
-      const response = await api.post(endpoint, payload);
-      const token = response.data?.data?.token ?? response.data?.token;
+  // Validate a stored token once on load so a stale/expired token shows the
+  // login form instead of a broken "logged in" screen.
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    let cancelled = false;
+    api
+      .get<{ user: { name: string } }>("/auth/me", { headers: { Authorization: `Bearer ${token}` } })
+      .then((response) => {
+        if (cancelled) return;
+        setUserName(response.data.user.name);
+        setSession("authenticated");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        // A 401 is handled by the interceptor event below. For other failures
+        // (API down) keep the user signed in; requests will report the error.
+        if (!(axios.isAxiosError(error) && error.response?.status === 401)) {
+          setSession("authenticated");
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
 
-      if (typeof token !== "string" || !token) {
-        throw new Error("Authentication response did not contain a token");
-      }
+  useEffect(() => {
+    const onExpired = () => endSession("Your session has expired. Please log in again.");
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
+  }, [endSession]);
 
-      localStorage.setItem("token", token);
-      setLoggedIn(true);
-      setMessage(isRegister ? "Account created successfully" : "Login successful");
-    } catch (error) {
-      setMessage(getErrorMessage(error, "Authentication failed"));
-    }
+  const handleAuthenticated = (token: string, mode: "login" | "register") => {
+    localStorage.setItem("token", token);
+    setNotice("");
+    setMessage(mode === "register" ? "Account created successfully." : "Logged in successfully.");
+    setSession("authenticated");
+    api
+      .get<{ user: { name: string } }>("/auth/me", { headers: { Authorization: `Bearer ${token}` } })
+      .then((response) => setUserName(response.data.user.name))
+      .catch(() => undefined);
   };
 
   const connectGitHub = async () => {
     try {
       const token = localStorage.getItem("token");
       if (!token) {
-        setMessage("Please login first");
+        endSession("Please log in first.");
         return;
       }
-
       const response = await api.get("/github/connect", {
         headers: { Authorization: `Bearer ${token}` },
       });
       window.location.href = response.data.authUrl;
     } catch (error) {
-      console.error(error);
-      setMessage("Failed to connect GitHub");
+      setMessage(getErrorMessage(error, "Failed to connect GitHub."));
     }
   };
 
-  const logout = () => {
-    localStorage.removeItem("token");
-    setLoggedIn(false);
-    setMessage("Logged out");
-  };
-
-  if (loggedIn) {
+  if (session === "checking") {
     return (
-      <main>
-        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h1>RepoDoctor AI</h1>
-          <button onClick={logout}>Logout</button>
-        </header>
-        <button onClick={() => void connectGitHub()}>Connect GitHub</button>
-        {message && <p role="status">{message}</p>}
-        <Repositories />
+      <main className="auth-page">
+        <p role="status">Checking your session…</p>
       </main>
     );
   }
 
+  if (session === "anonymous") {
+    return <AuthForm onAuthenticated={handleAuthenticated} notice={notice} />;
+  }
+
   return (
-    <main>
-      <h1>RepoDoctor AI</h1>
-      <h2>{isRegister ? "Create account" : "Login"}</h2>
-      <form onSubmit={handleAuth}>
-        {isRegister && (
-          <input
-            type="text"
-            placeholder="Name"
-            autoComplete="name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            required
-          />
-        )}
-        <input
-          type="email"
-          placeholder="Email"
-          autoComplete="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          required
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          autoComplete={isRegister ? "new-password" : "current-password"}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          minLength={isRegister ? 8 : undefined}
-          required
-        />
-        <button type="submit">{isRegister ? "Register" : "Login"}</button>
-      </form>
-      <button type="button" onClick={() => setIsRegister((value) => !value)}>
-        {isRegister ? "Already have an account? Login" : "Need an account? Register"}
-      </button>
-      {message && <p role="alert">{message}</p>}
+    <main className="app-shell">
+      <header className="app-header">
+        <h1>RepoDoctor AI</h1>
+        <div className="app-header-actions">
+          {userName && <span className="user-name">{userName}</span>}
+          <button type="button" className="secondary" onClick={() => endSession("You have been logged out.")}>
+            Log out
+          </button>
+        </div>
+      </header>
+      <div className="toolbar">
+        <button type="button" onClick={() => void connectGitHub()}>Connect GitHub</button>
+      </div>
+      {message && <p className="notice" role="status">{message}</p>}
+      <Repositories />
     </main>
   );
 }

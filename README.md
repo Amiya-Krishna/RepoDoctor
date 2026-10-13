@@ -2,61 +2,91 @@
 
 **AI-assisted analysis and verification-gated repair for JavaScript and TypeScript repositories.**
 
-RepoDoctor AI is a student portfolio project. It connects to a user's GitHub repositories, builds a repository snapshot and context, runs AI-assisted bug and security analysis with a deterministic risk score, and can attempt a repair: generate a patch, apply it in a disposable workspace, run tests in a network-less Docker container, ask a verification step to judge the evidence, retry up to three times, and open a GitHub pull request **only if verification succeeds**. It never merges pull requests.
+RepoDoctor AI connects to a user's GitHub repositories, builds a repository snapshot and context, runs AI-assisted bug and security analysis with a deterministic risk score, and can attempt a repair: generate a patch, apply it in a disposable workspace, run tests in a network-less Docker container, ask a verification step to judge the evidence, retry up to three times, and open a GitHub pull request **only if verification succeeds**. It never merges pull requests.
 
-**Project status:** The implementation includes the main stages of the RepoDoctor workflow, with fixes for authentication middleware ordering, analysis pipeline persistence and retry handling, AI provider configuration, verification-gate enforcement, GitHub token encryption, and Docker/Compose configuration.
-
-Additional fixes address Socket.IO proxying, OpenSSL availability in the server build stage, JWT expiry configuration, stale environment templates, client lint issues, and confirmed unused code. Regression tests and manual testing instructions have also been added or updated.
-
-See [MANUAL_TESTING_GUIDE.md](MANUAL_TESTING_GUIDE.md) for setup instructions, commands, and steps to test the application.
-
-**Verification limitations:** Client lint, type checking, and build checks pass. The available server test scripts and Docker Compose configuration validation also pass. However, the real Prisma Client generation and server build, Docker image builds, and live Docker integration remain unverified because of environment limitations. Database-backed application flows, live AI and GitHub integrations, and full end-to-end behavior still require verification in a properly configured environment.
-
-The project should not be considered production-ready until the remaining integration and deployment checks have been completed.
+The project is Docker-based: the supported way to run the whole stack is `docker compose up`. Docker is also what the repair worker uses to run a repository's tests in isolation.
 
 ## Contents
 
-[Problem](#problem-statement) · [Status](#current-implementation-status) · [Architecture](#architecture) · [Core workflow](#core-workflow) · [Stack](#technology-stack) · [Setup](#setup) · [Tests](#running-checks) · [Security](#security-boundaries) · [Benchmark](#benchmark) · [Limitations](#known-limitations) · [Docs](#documentation-map) · [Roadmap](#roadmap)
+[Quick start](#quick-start-docker-compose) · [Accounts](#registration-and-login) · [Status](#implementation-status) · [Architecture](#architecture) · [Stack](#technology-stack) · [Local development](#local-development-without-compose) · [Tests](#testing) · [Security](#security-boundaries) · [Troubleshooting](#troubleshooting) · [Limitations](#known-limitations) · [Docs](#documentation)
 
-## Problem statement
+## Quick start (Docker Compose)
 
-Triaging and fixing routine defects in a codebase is repetitive, and AI-generated patches are untrustworthy unless they are isolated and tested. RepoDoctor explores a cautious loop: propose, isolate, test, verify, then hand a pull request to a human.
+Prerequisites: Docker Engine 24+ with the Compose plugin, and a GitHub OAuth app (only needed for the GitHub features; registration and login work without it).
 
-The defensible claim is: *RepoDoctor attempts to detect selected classes of defects in JavaScript and TypeScript repositories, proposes and applies fixes in an isolated environment, verifies them through automated tests, and creates a pull request when validation succeeds.* It cannot fix every bug, and a passing test is evidence, not proof.
+```bash
+# 1. Configure
+cp .env.example .env                 # set DATABASE_URL (your Neon connection string) and REDIS_PASSWORD
+cp server/.env.example server/.env   # set JWT_SECRET (long random string), GitHub OAuth values, at least one AI key
+# Optional: GITHUB_TOKEN_ENCRYPTION_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")
+# For Compose set in server/.env: FRONTEND_URL=http://localhost:8080 and
+# GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback
 
-## Current implementation status
+# 2. Build and start (migrations, Redis, API, both workers, client)
+docker compose up --build -d
+docker compose ps                    # server should become "healthy"
 
-Labels are defined in the [development history](docs/DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document). Each row links to the day that owns the detail.
+# 3. Open the app
+#    http://localhost:8080
 
-| Capability | Status | Day |
-|---|---|---|
-| Registration, login, JWT-protected routes (bcrypt) | Partially implemented (no refresh tokens) | [2](docs/DEVELOPMENT_HISTORY.md#day-2--authentication) |
-| GitHub OAuth with signed, cookie-bound state | Partially implemented (token stored unencrypted) | [3](docs/DEVELOPMENT_HISTORY.md#day-3--github-oauth) |
-| Repository sync, list, delete | Implemented, not yet verified | [4](docs/DEVELOPMENT_HISTORY.md#day-4--repository-management) |
-| Ingestion (shallow clone, temp workspace) and analyzer snapshot | Partially implemented | [5](docs/DEVELOPMENT_HISTORY.md#day-5--repository-ingestion), [6](docs/DEVELOPMENT_HISTORY.md#day-6--repository-analyzer) |
-| LLM provider manager (OpenRouter → Groq → Gemini) | Implemented, not yet verified | [8](docs/DEVELOPMENT_HISTORY.md#day-8--llm-integration) |
-| Context builder (first 30 JS/TS files ≤ 50 KB) | Partially implemented | [9](docs/DEVELOPMENT_HISTORY.md#day-9--code-analysis-engine-repository-context) |
-| Bug detection agent | Implemented, not yet verified | [10](docs/DEVELOPMENT_HISTORY.md#day-10--bug-detection-agent) |
-| Security agent + six-rule static scanner | Partially implemented; scanner **verified (unit)** | [11](docs/DEVELOPMENT_HISTORY.md#day-11--security-agent) |
-| Test generation agent | Partially implemented (output never persisted or executed) | [12](docs/DEVELOPMENT_HISTORY.md#day-12--test-agent) |
-| Deterministic risk engine | **Implemented and verified (unit)** | [13](docs/DEVELOPMENT_HISTORY.md#day-13--risk-engine) |
-| Fix agent, disposable workspace, patch validation | Implemented, not yet verified | [15](docs/DEVELOPMENT_HISTORY.md#day-15--fix-agent), [16](docs/DEVELOPMENT_HISTORY.md#day-16--isolated-repair-workspace) |
-| Docker test runner | Partially implemented (no command detection; no dependency installation) | [17](docs/DEVELOPMENT_HISTORY.md#day-17--test-runner) |
-| Verification agent | Partially implemented (model verdict; exit code not independently enforced) | [18](docs/DEVELOPMENT_HISTORY.md#day-18--verification-agent) |
-| Bounded retry (3) with re-planning | Implemented, not yet verified | [19](docs/DEVELOPMENT_HISTORY.md#day-19--re-planning-and-retries) |
-| Verified-only pull request publication | Implemented, not yet verified | [20](docs/DEVELOPMENT_HISTORY.md#day-20--github-pull-request-generation) |
-| End-to-end repair flow | Implemented, not yet verified (never demonstrated) | [21](docs/DEVELOPMENT_HISTORY.md#day-21--week-3-milestone) |
-| BullMQ queues and two worker processes | Implemented, not yet verified | [22](docs/DEVELOPMENT_HISTORY.md#day-22--bullmq-and-background-processing) |
-| GitHub webhooks | Signature **verified (unit)**; delivery not yet verified | [23](docs/DEVELOPMENT_HISTORY.md#day-23--github-webhooks) |
-| Socket.IO real-time progress | Implemented, not yet verified | [24](docs/DEVELOPMENT_HISTORY.md#day-24--real-time-dashboard) |
-| Repository memory (lexical hashed-vector retrieval) | Partially implemented | [25](docs/DEVELOPMENT_HISTORY.md#day-25--rag-and-repository-memory) |
-| Benchmark evaluator and 5-case fixture | Evaluator **verified (unit)**; **no measured results** | [26](docs/DEVELOPMENT_HISTORY.md#day-26--benchmark-and-evaluation) |
-| Rate limiting | Implemented, not yet verified (dependency declared 11 Oct; build not run) | [27](docs/DEVELOPMENT_HISTORY.md#day-27--security-and-reliability) |
-| Token encryption, strict command policy, untrusted-context wrapper | Partially implemented (modules exist, not wired in) | [27](docs/DEVELOPMENT_HISTORY.md#day-27--security-and-reliability) |
-| Audit logging | Planned / not implemented (table only) | [27](docs/DEVELOPMENT_HISTORY.md#day-27--security-and-reliability) |
-| Docker Compose deployment | **Blocked or failing** as configured | [28](docs/DEVELOPMENT_HISTORY.md#day-28--deployment) |
-| CI/CD, AWS deployment, refresh tokens | Planned / not implemented | — |
-| Real screenshots, demo recording, licence file | Planned / not implemented | [29](docs/DEVELOPMENT_HISTORY.md#day-29--resume-and-github-polish), [30](docs/DEVELOPMENT_HISTORY.md#day-30--final-demo-and-interview-preparation) |
+# Logs / stop / stop and delete data
+docker compose logs -f server
+docker compose down                  # keeps the database and Redis volumes
+docker compose down -v               # DELETES the database and Redis volumes
+```
+
+Only the client is published (port 8080). nginx proxies `/api/` and `/socket.io/` to the API. The `migrate` service applies the Prisma migrations to the database in `DATABASE_URL` before the API starts.
+
+**Neon:** put the Neon connection string in the root `.env` as `DATABASE_URL`. Use the **direct** (non-pooled) endpoint (no `-pooler` in the host), keep `sslmode=require`, and add `connect_timeout=30` so a scaled-to-zero compute has time to wake. A pooled (PgBouncer) endpoint can break `prisma migrate deploy`; if you want pooling for the app, that requires a separate direct URL for migrations, which this project does not configure. Create a Neon **branch** for testing so test users and data never touch your main database. To run the bundled PostgreSQL instead, leave `DATABASE_URL` unset, set `POSTGRES_PASSWORD` (URL-safe characters) and start with `docker compose --profile bundled-db up --build -d`. Deployment details and limitations (notably: the repair worker has no Docker daemon inside Compose) are in [Operations §6](docs/OPERATIONS_SECURITY.md#6-docker-compose-deployment).
+
+## Registration and login
+
+Open the client, choose **Create an account**, enter a name, an email address and a password of 8–128 characters. Registration signs you in; later use **Log in**. Sessions are JWTs (lifetime `JWT_EXPIRES_IN`, default `1d`) kept in the browser; an expired or invalid token returns you to the login form.
+
+Check it from the command line against a running stack (replace the port with `5000` when running the API locally):
+
+```bash
+curl -s -X POST http://localhost:8080/api/auth/register -H 'Content-Type: application/json' \
+  -d '{"name":"Test User","email":"you@example.test","password":"a-long-password"}'
+curl -s -X POST http://localhost:8080/api/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.test","password":"a-long-password"}'
+```
+
+Behaviour: invalid input returns `400`; an existing email (any letter case, including concurrent requests) returns `409`; wrong password and unknown user both return the same `401` message; passwords are stored only as bcrypt hashes and never returned; authentication endpoints are rate limited to 10 failed attempts per 15 minutes per client.
+
+## Implementation status
+
+Status labels are defined in the [development history](docs/DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document). "Verified" means a named check was executed; see [Testing](docs/TESTING_EVALUATION_DEMO.md).
+
+| Capability | Status |
+|---|---|
+| Registration, login, JWT-protected routes (bcrypt) | **Implemented and verified** (API, database and browser tests); no refresh tokens |
+| GitHub OAuth with signed, cookie-bound state | Partially implemented (token stored unencrypted) |
+| Repository sync, list, delete | Implemented, not yet verified |
+| Ingestion (shallow clone, temp workspace) and analyzer snapshot | Partially implemented |
+| LLM provider manager (OpenRouter → Groq → Gemini) | Implemented, not yet verified |
+| Context builder (first 30 JS/TS files ≤ 50 KB) | Partially implemented |
+| Bug detection agent | Implemented, not yet verified |
+| Security agent + six-rule static scanner | Partially implemented; scanner **verified (unit)** |
+| Test generation agent | Partially implemented (output never persisted or executed) |
+| Deterministic risk engine | **Implemented and verified (unit)** |
+| Fix agent, disposable workspace, patch validation | Implemented, not yet verified |
+| Docker test runner | Partially implemented (no command detection; no dependency installation) |
+| Verification agent | Partially implemented (model verdict; exit code not independently enforced) |
+| Bounded retry (3) with re-planning | Implemented, not yet verified |
+| Verified-only pull request publication | Implemented, not yet verified |
+| End-to-end repair flow | Implemented, not yet verified (never demonstrated) |
+| BullMQ queues and two worker processes | Implemented, not yet verified |
+| GitHub webhooks | Signature **verified (unit)**; delivery not yet verified |
+| Socket.IO real-time progress | Implemented, not yet verified |
+| Repository memory (lexical hashed-vector retrieval) | Partially implemented |
+| Benchmark evaluator and 5-case fixture | Evaluator **verified (unit)**; **no measured results** |
+| Rate limiting | **Implemented and verified** (`test:app`) |
+| Token encryption, strict command policy, untrusted-context wrapper | Partially implemented (modules exist, not wired in) |
+| Audit logging | Planned / not implemented (table only) |
+| Docker Compose deployment (PostgreSQL, Redis, API, workers, client) | Implemented; `docker compose config` validates; images not yet built in CI-less verification (see Testing) |
+| CI/CD, AWS deployment, refresh tokens | Planned / not implemented |
+| Real screenshots, demo recording, licence file | Planned / not implemented |
 
 ## Architecture
 
@@ -77,7 +107,7 @@ Developer ─ React client ──REST + JWT──▶ Express API ──▶ Postg
                                                               └ FAILED → re-plan or stop
 ```
 
-This is a simplified view of the single reference diagram in [Architecture](docs/ARCHITECTURE.md). It shows the implemented design, not a claim that every integration has passed a live run.
+See [Architecture](docs/ARCHITECTURE.md) for the full reference diagram, API surface and trust boundaries.
 
 ## Core workflow
 
@@ -96,98 +126,85 @@ GitHub integration → repository ingestion → repository context → bug, secu
 | Execution | Docker (`node:22-bookworm-slim`, `--network none`) |
 | GitHub | OAuth, REST, git over HTTPS, signed webhooks, pull requests |
 
-## Setup
+## Local development (without Compose)
 
-These steps match the manifests and Compose file but **have not been executed**. Treat them as a starting point.
+Prerequisites: Node.js 22, npm, Git, a PostgreSQL 16 database (Neon or local), Redis 7 (Docker only for the repair worker).
 
-### Prerequisites
-
-Node.js 22, npm, Git, Docker (daemon reachable by the repair worker), PostgreSQL 16, Redis 7, a GitHub OAuth app, an OpenRouter API key (required: configuration throws without it), optional Groq and Gemini keys, and a GitHub webhook secret for webhook tests.
-
-### Configure
-
-Copy `server/.env.example` to `server/.env` and fill in real values locally. Names and notes are in [Operations §2.2](docs/OPERATIONS_SECURITY.md#22-server-environment-variables). Points that commonly trip people up:
-
-- `JWT_EXPIRES_IN` (digits + `s`/`m`/`h`/`d`, e.g. `12h`) sets the login-token lifetime since the third pass; an invalid or missing value falls back to `1d`.
-- Redis settings are `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD` (not a URL).
-- Set `GITHUB_TOKEN_ENCRYPTION_KEY` (base64, 32 bytes: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`) to store GitHub tokens encrypted. Without it they are stored as plain text and a warning is logged.
-- Set `TRUST_PROXY=1` when running behind a reverse proxy so rate limiting sees client IPs.
-- The client reads `VITE_API_URL` (default `http://localhost:5000/api`).
-
-### Install, migrate, run (outside Docker)
-
-```powershell
+```bash
 cd server
-npm install                  # runs prisma generate (postinstall)
-npx prisma migrate deploy    # 16 migrations; never `migrate reset` on data you need
-npm run dev                  # API + Socket.IO, default port 5000
+cp .env.example .env                 # fill in values (DATABASE_URL = Neon direct connection string); never commit .env
+npm install                          # runs prisma generate (postinstall)
+npx prisma migrate deploy            # never `migrate reset` on data you need
+npm run dev                          # API + Socket.IO on PORT (default 5000)
+npm run worker                       # scan worker (separate terminal)
+npm run repair-worker                # repair worker (needs git and Docker)
+
+cd ../client
+npm install
+npm run dev                          # http://localhost:5173 (API default http://localhost:5000/api, override with VITE_API_URL)
 ```
 
-In separate terminals:
+Configuration notes: `JWT_EXPIRES_IN` is digits plus `s`/`m`/`h`/`d` (invalid values fall back to `1d`); Redis uses `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD` (not a URL); without `GITHUB_TOKEN_ENCRYPTION_KEY` GitHub tokens are stored as plain text and a warning is logged; set `TRUST_PROXY=1` behind a reverse proxy; at least one AI provider key is required for analysis. Full variable reference: [Operations §2](docs/OPERATIONS_SECURITY.md#2-configuration).
 
-```powershell
-cd server; npm run worker           # scan worker
-cd server; npm run repair-worker    # repair worker (needs git and Docker)
-cd client; npm install; npm run dev # Vite, default http://localhost:5173
+## Testing
+
+```bash
+# Server (from server/; needs a migrated PostgreSQL, Redis, JWT_SECRET; export REDIS_PASSWORD for queue tests)
+# `test:auth` and `test:rag` write to DATABASE_URL: point it at a Neon branch, not your main database
+npx tsc --noEmit && npm run build
+npm run test:auth                    # registration + login against the real app and database
+npm run test:app                     # and the other scripts: npm run test:<name>
+# Client (from client/)
+npm run lint && npm run build
+# Compose file
+docker compose config -q
+# Browser end-to-end for registration/login (needs a running API + client; first time: npx playwright install chromium)
+npm run test:e2e                     # E2E_BASE_URL overrides the client URL (default http://localhost:5173)
 ```
 
-Note: `express-rate-limit` (`^8.7.1`) was missing from `server/package.json` and was added on 11 October 2026 (manifest and lockfile updated with `--package-lock-only`). A full `npm install` and `npm run build` have still **not** been run.
-
-### Docker Compose
-
-`docker-compose.yml` needs `DATABASE_URL` (an external PostgreSQL) and `REDIS_PASSWORD` in the environment or a root `.env` (template: `.env.example` in the project root), plus a filled-in `server/.env`, and publishes only the client on port 8080. The entry point, port, Redis variables, scan worker, `git` in the image and a server health check were fixed in the second audit and `docker compose config` validates, but **the images have not been built or run**. The repair worker still needs access to a Docker daemon, which Compose deliberately does not provide (mounting the host socket is root-equivalent). Details in [Operations §6](docs/OPERATIONS_SECURITY.md#6-docker-compose-reality-check). Do not run it exposed to the internet.
-
-## Running checks
-
-Only these were executed (11 October 2026, Node 22, scratch copy, no `npm install`); all exited 0:
-
-```powershell
-cd server
-npm run test:risk-engine
-npm run test:webhook-signature
-npm run test:static-security
-npm run test:benchmark
-npm run test:security
-```
-
-Everything else (builds, lint, Prisma validation, queue, database, Docker, AI and GitHub scripts, the client) is **not run**. The full inventory and requirements are in [Testing](docs/TESTING_EVALUATION_DEMO.md). The server has no `npm test`; the client has `npm run build` and `npm run lint`.
+Server `test:*` scripts are standalone programs, not a test framework; which ones need AI keys, repository paths or existing database rows is listed in [Testing §2](docs/TESTING_EVALUATION_DEMO.md#2-test-inventory). Step-by-step manual checks are in the [manual testing guide](docs/MANUAL_TESTING_GUIDE.md).
 
 ## Security boundaries
 
 By design: fixes are applied only in disposable workspaces; repository tests run only in Docker with no network, dropped capabilities, resource limits and a 120-second timeout; the GitHub token is passed to git through environment variables, never into the container or URLs; retries are bounded to three; `INCONCLUSIVE` stops the loop; publication requires a verified result and never force-pushes, pushes the default branch or merges; webhooks require a valid HMAC; repository text, test output and model output are treated as untrusted.
 
-Gaps (see [Operations §3](docs/OPERATIONS_SECURITY.md#3-security-control-status)): the verification verdict still comes from an LLM, but a `VERIFIED` verdict is now downgraded unless the Docker run exited 0 without timing out; GitHub tokens are encrypted only when `GITHUB_TOKEN_ENCRYPTION_KEY` is set (legacy plaintext values remain readable until users reconnect); the strict command policy, untrusted-context wrapper and audit logging are not connected; no cross-user authorization tests exist.
+Gaps (see [Operations §3](docs/OPERATIONS_SECURITY.md#3-security-control-status)): the verification verdict comes from an LLM, but a `VERIFIED` verdict is downgraded unless the Docker run exited 0 without timing out; GitHub tokens are encrypted only when `GITHUB_TOKEN_ENCRYPTION_KEY` is set; the strict command policy, untrusted-context wrapper and audit logging are not connected; no cross-user authorization tests exist.
+
+## Troubleshooting
+
+| Symptom | Likely cause / fix |
+|---|---|
+| `docker compose` says a variable is required | create the root `.env` from `.env.example` (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`) and `server/.env` from `server/.env.example` |
+| `server` never becomes healthy | `docker compose logs server migrate`; usually `JWT_SECRET` missing or a database URL problem |
+| `migrate` fails with a timeout, `P1001`, SSL or advisory-lock error on Neon | use the direct (non-pooled) URL with `sslmode=require&connect_timeout=30`; the first connection after idle can be slow while Neon wakes the compute |
+| Login shows "Cannot reach the server" | API not running or `VITE_API_URL` wrong (Compose uses `/api` through nginx) |
+| "Too many authentication attempts" | the auth rate limit (10 failures / 15 min) — wait, or restart the API in development |
+| Scans stay `waiting` | the scan worker is not running or cannot reach Redis |
+| Repair ends `INCONCLUSIVE` under Compose | the repair worker has no Docker daemon (see Limitations) |
+| Queue test scripts hang | export `REDIS_PASSWORD` in the shell first; the scripts do not read `server/.env` |
 
 ## Benchmark
 
-An evaluator, a CLI and a five-case seeded fixture exist, but **no benchmark has been run**, so there are no precision, recall or repair-rate results. `server/benchmarks/seeded-repo/run-results.example.json` is hand-written illustration. Method, gaps and the empty results table are in [Testing §6](docs/TESTING_EVALUATION_DEMO.md#6-seeded-defect-benchmark).
-
-## Screenshots and demo
-
-None. No screenshots, recording or demo URL exist; the images under `client/src/assets/` are Vite template assets. The demo protocol is in [Testing §8](docs/TESTING_EVALUATION_DEMO.md#8-end-to-end-demonstration-protocol-day-21-and-day-30).
+An evaluator, a CLI and a five-case seeded fixture exist, but **no benchmark has been run**, so there are no precision, recall or repair-rate results. `server/benchmarks/seeded-repo/run-results.example.json` is hand-written illustration. Method and the empty results table: [Testing §6](docs/TESTING_EVALUATION_DEMO.md#6-seeded-defect-benchmark).
 
 ## Known limitations
 
-- Nothing has been built or run end to end; see the status banner.
-- Compose images have not been built, and the repair worker has no Docker daemon in Compose (see Setup).
-- Generated tests are now saved with the analysis (fixed) but are never executed.
-- Test execution has no network and the clone has no `node_modules`, so repositories whose tests need installed packages will fail or be inconclusive; test commands are supplied by the caller, not detected.
-- Context selection is the first 30 JS/TS files, not finding-relevant files; repository memory is lexical, rebuilt on every scan and not filtered by branch.
-- At least one AI provider key is required; providers without a key are skipped (fixed).
+- Docker image builds and `docker compose up` were not executed in the most recent verification environment because it could not pull base images; the Compose file validates with `docker compose config`. Run the Quick start on a machine with registry access to confirm.
+- The database-backed tests were run against a local PostgreSQL (the verification environment could not download Prisma's engines, so it used Prisma's engine-less client with the same schema and the SQL migrations applied directly). **Neon itself was not tested**, and neither were `prisma migrate deploy` or schema/migration drift.
+- In Compose the repair worker has no Docker daemon, so repairs there end `INCONCLUSIVE`.
+- Generated tests are saved with the analysis but are never executed.
+- Test execution has no network and the clone has no `node_modules`, so repositories whose tests need installed packages fail or are inconclusive; test commands are supplied by the caller, not detected.
+- Context selection is the first 30 JS/TS files, not finding-relevant files; repository memory is lexical and rebuilt on every scan.
 - Static security rules are line-based heuristics, not SAST or dependency auditing.
 - Fork pull requests from webhooks are intentionally ignored.
-- There is no Git history in the archive, no CI configuration, and no repository licence file (`server/package.json` says ISC).
+- No screenshots, demo recording, CI configuration or repository licence file (`server/package.json` says ISC).
 
-## Documentation map
+## Documentation
 
-1. [Architecture](docs/ARCHITECTURE.md) — single reference diagram, stack, API surface, flows, trust boundaries.
-2. [Development history, Day 1–30](docs/DEVELOPMENT_HISTORY.md) — one section per day with objective, plan, actual implementation, evidence, gaps and next-day link.
-3. [Operations and security](docs/OPERATIONS_SECURITY.md) — environment variables, control status table, Compose defects, blockers.
-4. [Testing, evaluation and demo](docs/TESTING_EVALUATION_DEMO.md) — observed results, script inventory, benchmark method, demo protocol, release checklist.
-5. [Client notes](client/README.md) — frontend specifics.
-6. [Server notes](server/README.md) — backend layout, setup, API, scripts.
-7. [Manual testing guide](MANUAL_TESTING_GUIDE.md)
+1. [Architecture](docs/ARCHITECTURE.md) — reference diagram, stack, API surface, flows, trust boundaries.
+2. [Operations and security](docs/OPERATIONS_SECURITY.md) — environment variables, security controls, Compose deployment, failure triage.
+3. [Testing, evaluation and demo](docs/TESTING_EVALUATION_DEMO.md) — script inventory, benchmark method, demo protocol, release checklist.
+4. [Manual testing guide](docs/MANUAL_TESTING_GUIDE.md) — setup and functional test cases.
+5. [Development history](docs/DEVELOPMENT_HISTORY.md) — day-by-day development log of the 30-day plan.
+6. [Server](server/README.md) and [client](client/README.md) notes.
 
-## Roadmap
-
-The 30-day plan is the original roadmap; what each day achieved is in the history. The next steps, in priority order, are the follow-ups in [development history §6](docs/DEVELOPMENT_HISTORY.md#6-prioritized-follow-ups-documentation-findings-not-code-changes): declare the dependency and build; fix Compose; enforce the Docker result independently of the model; wire in the security modules; persist generated tests; produce a real benchmark; record an end-to-end demo.

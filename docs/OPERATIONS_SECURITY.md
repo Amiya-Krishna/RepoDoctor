@@ -1,6 +1,6 @@
 # RepoDoctor AI — Operations, Configuration, and Security
 
-**Baseline:** the supplied archive, audited by static inspection on 11 October 2026. Commands below were checked against `server/package.json` and `client/package.json`; they were **not** executed unless the [testing document](TESTING_EVALUATION_DEMO.md) says so. Status labels are defined in the [development history](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document).
+**Scope:** operational configuration, security controls and deployment notes. Test evidence is recorded in the [testing document](TESTING_EVALUATION_DEMO.md); status labels are defined in the [development history](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document).
 
 ## 1. Scope
 
@@ -21,7 +21,7 @@ Names are taken from the code and `server/.env.example`. Copy `server/.env.examp
 | `DATABASE_URL` | yes | Prisma datasource | PostgreSQL URL |
 | `PORT` | yes (5000) | `server.ts` | default 5000 (Compose/nginx expect 4000) |
 | `JWT_SECRET` | yes | auth, OAuth state, sockets | server refuses to start without it |
-| `JWT_EXPIRES_IN` | no (default `1d`) | `services/auth.service.ts` | digits + `s`/`m`/`h`/`d`; invalid values fall back to `1d` (read since the third pass) |
+| `JWT_EXPIRES_IN` | no (default `1d`) | `services/auth.service.ts` | digits + `s`/`m`/`h`/`d`; invalid values fall back to `1d` |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL` | yes | `services/github.service.ts` | OAuth |
 | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | yes | `ai/ai.config.ts` | key **required**; import throws if empty |
 | `GROQ_API_KEY`, `GROQ_MODEL`, `GEMINI_API_KEY`, `GEMINI_MODEL` | yes | `ai/ai.config.ts` | `.env.example` contains placeholder `...` values for Gemini |
@@ -105,40 +105,40 @@ Malicious repository scripts or symlinks; prompt injection in README/comments; o
 
 The user's own working copy is never involved; the "source" is always a fresh clone. A test that snapshots the clone's commit and status before and after a repair does not exist and should be added.
 
-## 6. Docker Compose reality check
+## 6. Docker Compose deployment
 
-The current file contains **no PostgreSQL service**: it requires `DATABASE_URL` (an external database) and `REDIS_PASSWORD`, publishes only the client on host port 8080, health-checks Redis and the API, and runs a one-shot `migrate` service (`prisma migrate deploy`). Older text that mentions `POSTGRES_PASSWORD`, an `internal: true` network or a PostgreSQL health check describes a previous version of the file.
+`docker-compose.yml` runs the whole stack. Only the client is published (host port 8080); PostgreSQL, Redis and the API are reachable only on the Compose networks.
 
-The stack has **not been built or started** (no Docker daemon in the verification sandbox). Defects found by reading the files:
-
-| # | Defect | Where |
+| Service | Image / build | Purpose |
 |---|---|---|
-| 1 | **Fixed 11 Oct 2026:** command was `node dist/index.js` (nonexistent) and the file repeated itself; now de-duplicated, runs `dist/server.js`. Also fixed: production `npm ci` now uses `--ignore-scripts` (it would have run `prisma generate` before `prisma/` was copied); untested, no image built. | `server/Dockerfile` |
-| 2 | **Fixed (audit 2):** Compose now sets `PORT=4000` for the server (matches `expose` and nginx). | `docker-compose.yml` |
-| 3 | **Fixed (audit 2):** Compose sets `REDIS_HOST=redis`, `REDIS_PORT` and `REDIS_PASSWORD` (the code never read `REDIS_URL`). | `docker-compose.yml` |
-| 4 | **Fixed (audit 2):** added a `scan-worker` service; the repair worker is now named `repair-worker`. | `docker-compose.yml` |
-| 5 | **Fixed (audit 2):** the `backend` network is no longer internal-only, so workers can reach GitHub and AI providers. | `docker-compose.yml` |
-| 6 | **Partly fixed (audit 2):** the runtime image now installs `git`. The repair worker still needs a Docker daemon; none is provided and the host socket is intentionally not mounted. Run the repair worker where Docker is available, or accept that repair jobs fail there. The build stage's `npm ci` now uses `--ignore-scripts` (its postinstall `prisma generate` ran before `prisma/` was copied). | `server/Dockerfile` |
-| 7 | **Fixed 11 Oct 2026:** `express-rate-limit` added to the manifest and lockfile. | `server/package.json` |
-| 8 | **Partly fixed (audit 2):** `server` has a health check and `client` waits for it. Workers have none; the nginx image has no TLS. | all |
-| 9 | **Removed 11 Oct 2026:** the unreferenced `docker/` directory (older dev Dockerfiles). | `docker/` |
-| 10 | **Fixed (third pass):** `client/nginx.conf` proxied only `/api/`, so Socket.IO (`/socket.io/`) got `index.html` and live progress never connected in the Compose stack. Added a `/socket.io/` location with WebSocket upgrade headers. Verified by running the real nginx in front of the real API: websocket and polling connect, a bad token is rejected, and the old file fails both. | `client/nginx.conf` |
-| 11 | **Fixed, not image-built (third pass):** the server build stage (`node:22-bookworm-slim`) had no `openssl`, which Prisma uses to pick the engine platform; it is now installed so the generated client matches the runtime image. | `server/Dockerfile` |
-| 12 | **Open:** the runtime image contains no `docker` CLI, so the Compose `repair-worker` can only end `INCONCLUSIVE` (spawn error, no exit code). Run it where Docker is installed, or build an image that adds the CLI and a daemon connection. | `docker-compose.yml`, `server/Dockerfile` |
-| 13 | **Not verified:** behaviour when a running job is cut off by `SIGKILL` (Compose waits only 10 s after `SIGTERM`; workers wait for the active job to finish before exiting). Idle shutdown was measured (exit 0 in under 1 s for the API and both workers). The scan pipeline clears earlier partial results when re-run; repair-job re-run behaviour was not tested. Consider `stop_grace_period` for the workers. | `docker-compose.yml` |
+| `postgres` | `postgres:16-alpine` | Optional bundled database, only with `--profile bundled-db` (volume `postgres_data`, health check). By default the stack uses the external database in `DATABASE_URL`, e.g. Neon. |
+| `migrate` | `server/Dockerfile` (build stage) | One-shot `prisma migrate deploy`; the API and workers wait for it to complete. |
+| `redis` | `redis:7-alpine` | BullMQ queues; password required, append-only persistence. |
+| `server` | `server/Dockerfile` | API + Socket.IO on port 4000, health check on `/api/health`. |
+| `scan-worker` | `server/Dockerfile` | Processes repository scans. |
+| `repair-worker` | `server/Dockerfile` | Processes autonomous repairs (see limitation below). |
+| `client` | `client/Dockerfile` (nginx) | Serves the SPA and proxies `/api/` and `/socket.io/` to `server:4000`. |
 
-The client Docker build (`client/Dockerfile`) and its nginx proxy look plausible but were not built.
+Required variables (root `.env`, template `.env.example`): `DATABASE_URL` and `REDIS_PASSWORD` (or `POSTGRES_PASSWORD` instead of `DATABASE_URL` with the `bundled-db` profile; use URL-safe characters because it is embedded in the database URL).
+
+**Neon:** use the direct (non-pooled) connection string with `sslmode=require&connect_timeout=30`. Pooled (PgBouncer) endpoints can break `prisma migrate deploy`, and the schema declares no separate direct URL. Neon computes that scale to zero take a moment to wake, so the first `migrate` run may be slow. Use a Neon branch for test runs. A filled-in `server/.env` is also required (`JWT_SECRET`, GitHub OAuth, AI keys). Compose overrides `DATABASE_URL`, `REDIS_*`, `PORT` and `NODE_ENV` for the containers.
+
+Known limitations:
+
+- **Repair worker and Docker:** the runtime image has no `docker` CLI and Compose does not mount the host Docker socket (that would grant root on the host). The `repair-worker` can therefore only finish with an `INCONCLUSIVE` result. Run it on a host with Docker, or build an image that adds the CLI and a daemon connection you trust.
+- **Shutdown:** Compose sends `SIGTERM` and waits 10 s; workers wait for the active job to finish. Consider `stop_grace_period` for the workers if jobs are long.
+- **No TLS:** the bundled nginx serves plain HTTP. Put a TLS-terminating proxy in front for anything beyond local use.
+- **Verification status:** `docker compose config` validates the file. The images have not been built in the environment used for the most recent verification because it could not pull base images; see [Testing](TESTING_EVALUATION_DEMO.md).
 
 ## 7. Release blockers (security and operations)
 
-Before any public deployment: fix the remaining Compose/Dockerfile defects above; run a clean install and build; make token encryption real (wire it in, migrate existing tokens, manage the key outside the database); enforce the Docker result independently of the model; use the stricter command policy; wire the audit service; add `trust proxy` and a shared rate-limit store if more than one API instance is used; add cross-user authorization tests; add TLS, backups, log retention, health checks and a rollback procedure; run the end-to-end safety tests in [Testing](TESTING_EVALUATION_DEMO.md).
+Before any public deployment: resolve the Compose limitations above; run a clean install and build; make token encryption real (wire it in, migrate existing tokens, manage the key outside the database); enforce the Docker result independently of the model; use the stricter command policy; wire the audit service; add `trust proxy` and a shared rate-limit store if more than one API instance is used; add cross-user authorization tests; add TLS, backups, log retention, health checks and a rollback procedure; run the end-to-end safety tests in [Testing](TESTING_EVALUATION_DEMO.md).
 
 ## 8. Failure triage
 
 | Symptom | Check first | Safe response |
 |---|---|---|
 | API exits at start | `JWT_SECRET`, database reachability, Redis reachability (realtime waits for queue events) | fix configuration; do not reset a database holding data |
-| Import error for `express-rate-limit` | `server/node_modules` | run `npm install` (dependency is now declared) |
 | Scan stays `waiting` | scan worker running? Redis settings | start `npm run worker`; inspect job status endpoint |
 | AI error at startup | `OPENROUTER_API_KEY` | set it; the other providers cannot substitute because config import throws |
 | Docker run fails | daemon reachable from the repair worker, image pull possible | record as execution failure; never treat as verified |

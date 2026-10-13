@@ -1,6 +1,6 @@
 # RepoDoctor AI — Architecture and Design
 
-**Baseline:** the supplied archive, audited by static inspection on 11 October 2026. Status labels are defined in [Development history §1.2](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document). Day references (for example "Day 17") point to sections of the [Day 1–30 history](DEVELOPMENT_HISTORY.md). Nothing here is claimed as passing unless a check is named.
+**Scope:** this document describes the implemented design. Status labels are defined in [Development history §1.2](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document). Day references (for example "Day 17") point to sections of the [Day 1–30 history](DEVELOPMENT_HISTORY.md). Test status for each area is in [Testing](TESTING_EVALUATION_DEMO.md).
 
 ## 1. System goals
 
@@ -197,7 +197,7 @@ Limitations that affect the architecture:
 4. **Memory** is lexical retrieval, rebuilt per scan, not filtered by branch/commit.
 5. **Security modules not connected:** token encryption, the strict command policy, the untrusted-context wrapper and the audit-event service. See [Operations and security §3](OPERATIONS_SECURITY.md#3-security-control-status).
 6. **Deployment:** Compose is development-oriented and, as written, would not start a working stack (listed in [Operations §6](OPERATIONS_SECURITY.md#6-docker-compose-reality-check)).
-7. `express-rate-limit` was missing from `server/package.json`; it was declared on 11 October 2026 (build still not run).
+7. `express-rate-limit` is declared in `server/package.json` and covered by `npm run test:app`.
 
 ## 10. Architecture acceptance criteria
 

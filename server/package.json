@@ -43,7 +43,8 @@
     "benchmark:evaluate": "tsx src/benchmark/run-benchmark.ts",
     "test:security": "tsx src/test-security-controls.ts",
     "test:verification-gate": "tsx src/test-verification-gate.ts",
-    "test:app": "tsx src/test-app-middleware.ts"
+    "test:app": "tsx src/test-app-middleware.ts",
+    "test:auth": "tsx src/test-auth-flow.ts"
   },
   "keywords": [],
   "author": "",

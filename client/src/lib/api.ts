@@ -1,9 +1,30 @@
 import axios from "axios";
 
+export const AUTH_EXPIRED_EVENT = "repodoctor:auth-expired";
+
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:5000/api",
   withCredentials: true,
 });
+
+// A 401 on a request that carried a token means the session is no longer
+// valid (expired or revoked). Drop the token and tell the app to show the
+// login form. Login/register failures (wrong password) are not session expiry.
+api.interceptors.response.use(
+  (response) => response,
+  (error: unknown) => {
+    if (
+      axios.isAxiosError(error) &&
+      error.response?.status === 401 &&
+      error.config?.headers?.Authorization &&
+      !/\/auth\/(login|register)$/.test(error.config.url ?? "")
+    ) {
+      localStorage.removeItem("token");
+      window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+    }
+    return Promise.reject(error);
+  },
+);
 
 /** Best-effort human-readable message from an Axios or generic error. */
 export const getErrorMessage = (error: unknown, fallback: string): string => {

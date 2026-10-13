@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { io, type Socket } from "socket.io-client";
+import axios from "axios";
 import { api, getErrorMessage } from "../lib/api";
 import { authHeaders } from "../lib/auth";
 import {
@@ -18,6 +19,14 @@ interface ScanProgress {
   status?: string;
 }
 
+const NOT_CONNECTED_MESSAGE = "GitHub account is not connected";
+
+/** True when the API says the user has not linked a GitHub account yet. */
+const isGitHubNotConnected = (error: unknown) =>
+  axios.isAxiosError(error) &&
+  error.response?.status === 400 &&
+  (error.response.data as { message?: unknown } | undefined)?.message === NOT_CONNECTED_MESSAGE;
+
 const socketBaseUrl = () =>
   (import.meta.env.VITE_API_URL ?? "http://localhost:5000/api")
     .replace(/\/api\/?$/, "");
@@ -28,15 +37,22 @@ function Repositories() {
   const [activeJobs, setActiveJobs] = useState<Record<string, string>>({});
   const [progressByRepository, setProgressByRepository] = useState<Record<string, ScanProgress>>({});
   const [error, setError] = useState("");
+  const [githubConnected, setGithubConnected] = useState(true);
   const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | null>(null);
 
   const loadRepositories = useCallback(async () => {
     try {
       setRepositories(await getRepositories());
+      setGithubConnected(true);
       setError("");
     } catch (loadError) {
-      console.error(loadError);
-      setError("Failed to load repositories. Check your login and GitHub connection.");
+      if (isGitHubNotConnected(loadError)) {
+        setGithubConnected(false);
+        setError("");
+      } else {
+        console.error(loadError);
+        setError(getErrorMessage(loadError, "Failed to load repositories."));
+      }
     } finally {
       setLoading(false);
     }
@@ -56,9 +72,12 @@ function Repositories() {
         if (!cancelled) setRepositories(loaded);
       })
       .catch((loadError) => {
-        console.error(loadError);
-        if (!cancelled) {
-          setError("Failed to load repositories. Check your login and GitHub connection.");
+        if (cancelled) return;
+        if (isGitHubNotConnected(loadError)) {
+          setGithubConnected(false);
+        } else {
+          console.error(loadError);
+          setError(getErrorMessage(loadError, "Failed to load repositories."));
         }
       })
       .finally(() => {
@@ -234,23 +253,27 @@ function Repositories() {
     }
   };
 
-  if (loading) return <p>Loading repositories...</p>;
+  if (loading) return <p role="status">Loading repositories…</p>;
 
   return (
     <section>
       <h2>Your GitHub Repositories</h2>
       <button onClick={() => void refreshRepositories()}>Refresh repositories</button>
 
-      {error && <p role="alert" style={{ color: "crimson" }}>{error}</p>}
+      {error && <p role="alert" className="form-error">{error}</p>}
 
       {repositories.length === 0 ? (
-        <p>No repositories found. Connect GitHub and refresh this list.</p>
+        <p className="notice">
+          {githubConnected
+            ? "No repositories found. Refresh the list to sync from GitHub."
+            : "Connect your GitHub account (button above) to list and analyze your repositories."}
+        </p>
       ) : repositories.map((repository) => {
         const progress = progressByRepository[repository.id];
         const busy = Boolean(activeJobs[repository.id]);
 
         return (
-          <article key={repository.id} style={{ border: "1px solid #ddd", padding: 20, margin: "15px 0", borderRadius: 8 }}>
+          <article key={repository.id} className="card">
             <h3>{repository.name}</h3>
             <p>{repository.fullName}</p>
             <p>Default branch: {repository.defaultBranch}</p>
@@ -260,7 +283,7 @@ function Repositories() {
             <button onClick={() => setSelectedRepositoryId(repository.id)}>
               View analysis
             </button>
-            <button onClick={() => void handleDelete(repository.id)}>
+            <button type="button" className="danger" onClick={() => void handleDelete(repository.id)}>
               Remove repository
             </button>
 
@@ -278,7 +301,7 @@ function Repositories() {
       })}
 
       {selectedRepositoryId && (
-        <section style={{ marginTop: 28, borderTop: "2px solid #ddd", paddingTop: 20 }}>
+        <section className="analysis-panel">
           <button onClick={() => setSelectedRepositoryId(null)}>Close analysis</button>
           <RepositoryAnalysis repositoryId={selectedRepositoryId} />
           <AnalysisHistory repositoryId={selectedRepositoryId} />

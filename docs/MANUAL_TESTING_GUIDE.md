@@ -1,12 +1,12 @@
 # RepoDoctor AI — Manual Testing and Execution Guide
 
-Companion to `PROJECT_AUDIT_REPORT.md`. Every command, route, port, table and button label below was checked against the repository (`server/package.json`, `client/package.json`, `server/src/routes/*`, `server/prisma/schema.prisma`, `docker-compose.yml`, `client/src/pages/*`). Nothing here contains secrets; replace `<placeholders>` with your own values.
+Companion to [Testing](TESTING_EVALUATION_DEMO.md). Every command, route, port, table and button label below was checked against the repository (`server/package.json`, `client/package.json`, `server/src/routes/*`, `server/prisma/schema.prisma`, `docker-compose.yml`, `client/src/pages/*`). Nothing here contains secrets; replace `<placeholders>` with your own values.
 
 **How to read the status tags.**
 
 | Tag | Meaning |
 |---|---|
-| **EXECUTED** | Run exactly as written during the third-pass verification, with the result stated |
+| **EXECUTED** | Run exactly as written during verification, with the result stated |
 | **PARTLY EXECUTED** | The part that needs no database/GitHub/AI was run; the rest was not |
 | **NOT EXECUTED** | Written from the source code; the verification sandbox could not run it (no generated Prisma client, no Docker daemon, no GitHub or AI credentials). Treat as unverified until you run it |
 
@@ -136,7 +136,7 @@ Compose does not start PostgreSQL (use `host.docker.internal` or a host IP in `D
 
 Run in `server/` unless stated. There is no `npm test`, no test framework and no server linter. The "tests" are standalone `tsx` scripts that exit non-zero on failure.
 
-| ID | Command | Needs | Expected last line / result | Third-pass result |
+| ID | Command | Needs | Expected last line / result | Result |
 |---|---|---|---|---|
 | AT-01 | `npm run test:risk-engine` | nothing | exits 0 (prints severity counts) | PASS |
 | AT-02 | `npm run test:webhook-signature` | nothing | `GitHub webhook signature tests passed.` | PASS |

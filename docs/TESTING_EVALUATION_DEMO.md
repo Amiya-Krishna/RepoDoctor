@@ -2,53 +2,35 @@
 
 ## 1. Purpose and evidence policy
 
-This document separates **test scripts that exist** from **results that were observed**. A command or file existing is never recorded as a pass. For every result the date, environment, exact command and exit code are given.
+This document separates **test scripts that exist** from **results that were observed**. A command or file existing is never recorded as a pass. For every result the environment, exact command and exit code are given. A check that could not run is marked **BLOCKED** (with the reason), never PASS.
 
-Status labels are defined in the [development history](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document).
+Status labels are defined in the [development history](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document). 
 
-## 2. Results actually observed
+## 2. Test inventory
 
-The archive contains no `.git` directory, so no commit SHA exists to record.
+There is no test framework and no `npm test` in `server/`; each `test:*` script is a standalone `tsx` program that exits non-zero on failure. The client has `lint` and `build` only. Scripts are grouped by what they need.
 
-**Environment for every entry below:** 11 October 2026, Linux 6.18, Node.js 22.22.0, `tsx` installed globally, run inside a **scratch copy** of the archive (the delivered files were not touched). `npm install` was **not** run, so no `node_modules` existed; only scripts that depend on nothing but Node built-ins and project files could run. No Docker, Redis, PostgreSQL, GitHub or AI provider access.
-
-| Test | Command (from `server/`) | Services/credentials needed | Exit | Result | Evidence (sanitized) |
-|---|---|---|:-:|---|---|
-| Risk engine | `npm run test:risk-engine` (executed as `tsx src/test-risk-engine.ts`) | none | 0 | **PASS** (script prints, does not assert) | printed overall score 73, level CRITICAL, priority P0, 3 findings (1 critical, 1 high, 1 medium) |
-| Webhook signature | `npm run test:webhook-signature` | none | 0 | **PASS** | `GitHub webhook signature tests passed.` |
-| Static security scanner | `npm run test:static-security` | none | 0 | **PASS** | `Static security scanner tests passed.` |
-| Benchmark evaluator | `npm run test:benchmark` | none | 0 | **PASS** | `Benchmark evaluator tests passed.` |
-| Security control modules | `npm run test:security` with a throw-away random `GITHUB_TOKEN_ENCRYPTION_KEY` | none | 0 | **PASS** | `Security control tests passed.` Proves the modules behave; does **not** prove the app uses them |
-| Benchmark CLI on the example file | `tsx src/benchmark/run-benchmark.ts benchmarks/seeded-repo/ground-truth.json benchmarks/seeded-repo/run-results.example.json` | none | 0 | ran | 1 of 5 expected found → recall 0.2, F1 ≈ 0.33. **Illustrative example data, not a measurement.** Default paths in the script point at files that do not exist |
-| RAG | `npm run test:rag` | PostgreSQL, dependencies | 1 | **BLOCKED** | `ERR_MODULE_NOT_FOUND` (no installed dependencies) |
-| Context builder | `npm run test:context -- <path>` | a repository path | 1 | **NOT RUN** | exited on the missing path argument |
-| Repair workspace | `npm run test:repair-workspace -- <git-repo-path>` | a git repository path | 1 | **NOT RUN** | exited on the missing path argument |
-
-Nothing else has been run. In particular **not run**: `npm install`, `npm run build` (server and client), `npm run lint` (client), `npx prisma validate`, migrations on a database, any queue test, any Docker test, any live AI or GitHub test, any browser test. Their status is **NOT RUN**, which is not a pass.
-
-## 3. Test and script inventory (from `package.json`)
-
-There is no test framework and no `npm test` in `server/`; each `test:*` script is a standalone `tsx` program. The client has no tests (`build` and `lint` only).
-
-| Script | Needs | Observed? |
+| Group | Scripts (`npm run <name>` in `server/`) | Needs |
 |---|---|---|
-| `test:risk-engine`, `test:webhook-signature`, `test:static-security`, `test:benchmark`, `test:security` | nothing external | passed (§2) |
-| `benchmark:evaluate` | ground-truth and run-results JSON paths | ran on the example file (§2) |
-| `test:context` | repository path | not run |
-| `test:repair-workspace` | git repository path | not run |
-| `test:rag`, `test:analysis-pipeline`, `test:repair-job-history`, `test:repair-job-pagination`, `test:repair-job-metrics` | PostgreSQL (and, for the pipeline, AI keys) | not run |
-| `test:scan-queue`, `test:repair-queue` | Redis (BullMQ), possibly PostgreSQL | not run |
-| `test:ai`, `test:openrouter`, `test:groq`, `test:gemini`, `test:bug-agent`, `test:security-agent`, `test:test-generation`, `test:fix-agent`, `test:verification-agent` | live AI keys | not run |
-| `test:docker-runner` | Docker daemon | not run |
-| `test:repair-retry`, `test:autonomous-repair` | PostgreSQL, AI, Docker, repository fixture | not run |
-| `test:github-pr` | GitHub token and a disposable repository | not run |
-| Client `build`, `lint` | `npm install` | not run |
-| `npx prisma validate`, `npm run prisma:deploy` | dependencies, database | not run |
+| Self-contained | `test:risk-engine`, `test:webhook-signature`, `test:static-security`, `test:benchmark`, `test:security`, `test:verification-gate`, `test:ai-selection` | nothing external (`test:security` needs `GITHUB_TOKEN_ENCRYPTION_KEY`) |
+| HTTP / middleware | `test:app` | Redis, generated Prisma client |
+| Authentication | `test:auth` | migrated PostgreSQL, `JWT_SECRET`, Redis settings. Registers, logs in and deletes unique throw-away users: validation, duplicate and concurrent-duplicate handling, bcrypt storage, wrong-password / unknown-user responses, protected endpoints |
+| Database | `test:rag` | PostgreSQL |
+| Queues | `test:scan-queue`, `test:repair-queue` | Redis (set `REDIS_PASSWORD` in the shell; the scripts do not load `server/.env`) |
+| Need a path argument | `test:context -- <repo-path>`, `test:repair-workspace -- <git-repo-path>`, `test:docker-runner -- <repo-path>`, `test:github-pr -- <repo-path>` | a repository (a git repository for `repair-workspace`; Docker for `docker-runner`; GitHub token for `github-pr`) |
+| Need AI keys | `test:ai`, `test:openrouter`, `test:groq`, `test:gemini`, `test:bug-agent`, `test:security-agent`, `test:test-generation`, `test:fix-agent`, `test:verification-agent`, `test:analysis-pipeline`, `test:repair-retry`, `test:autonomous-repair` | at least one of `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` (and for some, a database and Docker) |
+| Need existing data | `test:repair-job-history`, `test:repair-job-pagination`, `test:repair-job-metrics` | `REPAIR_JOB_ID` / `ANALYSIS_ID` of existing rows |
+| Browser | `npm run test:e2e` (in `client/`) | running API and client, Playwright Chromium |
+| Static | `npx tsc --noEmit`, `npm run build` (server); `npm run lint`, `npm run build` (client); `docker compose config -q` | dependencies; a root `.env` and `server/.env` for Compose |
+
+## 3. Results observed
+
+All self-contained, HTTP, authentication, database, queue and path-argument scripts that could be run passed; the browser authentication check passed; AI-, GitHub- and Docker-dependent scripts and Docker image builds were not run.
 
 ## 4. Validation layers (target)
 
-1. Static: server and client builds, client lint, Prisma validate, lockfiles consistent with manifests. (`express-rate-limit` was undeclared and was added on 11 October 2026; no install/build has been run since.)
-2. Focused unit scripts (the §2 set and `test:context`).
+1. Static: server and client builds, client lint, Prisma validate, lockfiles consistent with manifests.
+2. Focused unit scripts (the self-contained group and `test:context`).
 3. Service integration: migrations on a fresh PostgreSQL, Redis queues, worker progress, Socket.IO plus REST recovery.
 4. External integration: OAuth, GitHub API, webhook delivery, AI failover, PR creation.
 5. Safety: source immutability, patch path validation, token isolation, Docker limits, forged-webhook rejection, cross-user authorization.

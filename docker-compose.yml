@@ -1,19 +1,47 @@
-# RepoDoctor deployment. Requires in the shell or a root .env file:
-#   DATABASE_URL    PostgreSQL connection string reachable from the containers
+# RepoDoctor stack: API server, scan worker, repair worker, Redis and the
+# nginx-served React client (the only published port, 8080).
+#
+# Database: set DATABASE_URL in the root .env to your PostgreSQL, e.g. a Neon
+# connection string (see .env.example). Optionally run the bundled PostgreSQL
+# instead: set POSTGRES_PASSWORD, leave DATABASE_URL unset and start with
+#   docker compose --profile bundled-db up --build -d
+#
+# Required in the shell or a root .env file (see .env.example):
+#   DATABASE_URL (or POSTGRES_PASSWORD with the bundled-db profile)
 #   REDIS_PASSWORD  password for the bundled Redis
 # and a filled-in server/.env (copy server/.env.example).
 #
 # Not included: the repair worker runs repository tests in Docker, which needs
 # access to a Docker daemon. This file deliberately does NOT mount the host
 # Docker socket (that grants root on the host); see docs/OPERATIONS_SECURITY.md.
+x-database-url: &database-url ${DATABASE_URL:-postgresql://repodoctor:${POSTGRES_PASSWORD:-}@postgres:5432/repodoctor?schema=public}
+
 x-server-env: &server-env
   NODE_ENV: production
-  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in root .env}
+  DATABASE_URL: *database-url
   REDIS_HOST: redis
   REDIS_PORT: "6379"
   REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in root .env}
 
 services:
+  postgres:
+    profiles: ["bundled-db"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: repodoctor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DB: repodoctor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U repodoctor -d repodoctor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - backend
+
   migrate:
     build:
       context: ./server
@@ -23,9 +51,13 @@ services:
       - ./server/.env
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in root .env}
+      DATABASE_URL: *database-url
     command: ["npx", "prisma", "migrate", "deploy"]
     restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
     networks:
       - backend
 
@@ -123,6 +155,7 @@ services:
       - frontend
 
 volumes:
+  postgres_data:
   redis_data:
 
 networks:
