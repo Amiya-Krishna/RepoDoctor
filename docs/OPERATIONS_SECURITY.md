@@ -10,7 +10,7 @@ This document covers local development, configuration, the real security posture
 
 ### 2.1 Prerequisites
 
-Node.js 22, npm, Git, Docker (daemon reachable by whichever process runs the repair worker), PostgreSQL 16, Redis 7, a GitHub OAuth application, at least an OpenRouter API key (required at import time), and optionally Groq and Gemini keys.
+Node.js 22, npm, Git, Docker (daemon reachable by whichever process runs the repair worker), PostgreSQL 16, Redis 7, a GitHub OAuth application, and **at least one** AI provider key (OpenRouter, Groq or Gemini; `ai.config.ts` throws at import only when none of the three is a real value). Commands in this document are bash (Git Bash or WSL on Windows).
 
 ### 2.2 Server environment variables
 
@@ -23,36 +23,39 @@ Names are taken from the code and `server/.env.example`. Copy `server/.env.examp
 | `JWT_SECRET` | yes | auth, OAuth state, sockets | server refuses to start without it |
 | `JWT_EXPIRES_IN` | no (default `1d`) | `services/auth.service.ts` | digits + `s`/`m`/`h`/`d`; invalid values fall back to `1d` |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL` | yes | `services/github.service.ts` | OAuth |
-| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | yes | `ai/ai.config.ts` | key **required**; import throws if empty |
-| `GROQ_API_KEY`, `GROQ_MODEL`, `GEMINI_API_KEY`, `GEMINI_MODEL` | yes | `ai/ai.config.ts` | `.env.example` contains placeholder `...` values for Gemini |
+| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | yes | `ai/ai.config.ts` | at least one of the three provider keys must be set; import throws `No AI provider is configured` otherwise (reproduced) |
+| `GROQ_API_KEY`, `GROQ_MODEL`, `GEMINI_API_KEY`, `GEMINI_MODEL` | yes | `ai/ai.config.ts` | empty and `...` values count as not configured |
 | `GITHUB_OWNER`, `GITHUB_REPO`, `GITHUB_BASE_BRANCH`, `GITHUB_TOKEN` | yes | PR service fallbacks, `test-github-pr.ts` | production repair passes owner, repo, base branch and the user's token explicitly |
 | `GITHUB_TOKEN_ENCRYPTION_KEY` | yes | `security/token-encryption.ts` | base64, 32 bytes; module is not wired into the application |
-| `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD` | yes | `queue/scan.queue.ts` | Compose's `REDIS_URL` is **not** read |
+| `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD` | yes | `queue/scan.queue.ts` | not a URL; no `REDIS_URL` is read anywhere. Compose sets host `redis`, port `6379` and `REDIS_PASSWORD` |
 | `SCAN_WORKER_CONCURRENCY` | yes (2) | scan worker | |
 | `REPAIR_WORKER_CONCURRENCY` | no (default 1) | repair worker | |
 | `GITHUB_WEBHOOK_SECRET` | yes | webhook controller | missing → webhook returns 503 |
-| `FRONTEND_URL` | yes | CORS, Socket.IO, OAuth redirect | default `http://localhost:5173` |
+| `FRONTEND_URL` | yes | CORS, Socket.IO, OAuth redirect | default `http://localhost:5173`; must equal the browser origin exactly (no trailing slash). Compose: `http://localhost:8080`. In production only this origin is allowed |
 | `NODE_ENV` | no | cookie `secure` flag | |
 
 Client: `VITE_API_URL` (`client/.env.example`; default `http://localhost:5000/api`; the client Docker build uses `/api`).
 
-Compose-level: `POSTGRES_PASSWORD` and `REDIS_PASSWORD` must be set in the shell or a root `.env` file (Compose refuses to start otherwise).
+Compose-level (shell or root `.env`): `REDIS_PASSWORD` is always required (Compose fails with `required variable REDIS_PASSWORD is missing a value`); `DATABASE_URL` for an external database, or `POSTGRES_PASSWORD` with `--profile bundled-db`. `server/.env` must exist.
 
-### 2.3 Local run (outside Docker) — commands match the manifests; not executed
+### 2.3 Local run (outside Docker) — commands match the manifests; not executed end to end (Prisma engine download was blocked during the audit)
 
-```powershell
-# terminal 0: PostgreSQL and Redis must already be running and match server/.env
+```bash
+# PostgreSQL and Redis must already be running and match server/.env
 cd server
 npm install                 # postinstall runs `prisma generate`
 npx prisma migrate deploy   # or: npm run prisma:deploy
-npm run dev                 # API + Socket.IO (tsx watch src/server.ts)
+npm run dev                 # API + Socket.IO (tsx watch src/server.ts), http://localhost:5000/api/health
 ```
 
-```powershell
-cd server; npm run worker          # scan worker
-cd server; npm run repair-worker   # repair worker (needs git, Docker daemon, GitHub token in DB)
-cd client; npm install; npm run dev
+```bash
+# each in its own terminal, from the repository root
+(cd server && npm run worker)          # scan worker
+(cd server && npm run repair-worker)   # repair worker (needs git, Docker daemon, GitHub token in DB)
+(cd client && npm install && npm run dev)   # http://localhost:5173
 ```
+
+In PowerShell, run the `cd` and `npm` commands on separate lines (Windows PowerShell 5.1 has no `&&`).
 
 Do not run `prisma migrate reset` against data that must be kept. Before applying migrations to a shared database, back it up and review the SQL.
 
@@ -119,7 +122,19 @@ The user's own working copy is never involved; the "source" is always a fresh cl
 | `repair-worker` | `server/Dockerfile` | Processes autonomous repairs (see limitation below). |
 | `client` | `client/Dockerfile` (nginx) | Serves the SPA and proxies `/api/` and `/socket.io/` to `server:4000`. |
 
-Required variables (root `.env`, template `.env.example`): `DATABASE_URL` and `REDIS_PASSWORD` (or `POSTGRES_PASSWORD` instead of `DATABASE_URL` with the `bundled-db` profile; use URL-safe characters because it is embedded in the database URL).
+Required variables (root `.env`, template `.env.example`): `REDIS_PASSWORD`, and either `DATABASE_URL` or, with `--profile bundled-db`, `POSTGRES_PASSWORD` (URL-safe characters only because it is embedded in the database URL). `server/.env` (template `server/.env.example`) is also required; set `FRONTEND_URL=http://localhost:8080` and `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback` there for a local Compose run.
+
+Commands (add `--profile bundled-db` to each when using the bundled PostgreSQL):
+
+```bash
+docker compose config -q          # verified: exit 0 with both env files present
+docker compose up --build -d      # NOT executed in the audit (Docker Hub blocked)
+docker compose ps                 # migrate exits 0; redis and server healthy
+docker compose logs migrate server
+docker compose down               # keeps volumes; `down -v` deletes redis_data (and postgres_data)
+```
+
+URLs: client http://localhost:8080, API health http://localhost:8080/api/health (through nginx). No other port is published. Database initialisation is the `migrate` service (`prisma migrate deploy`, 16 migrations).
 
 **Neon:** use the direct (non-pooled) connection string with `sslmode=require&connect_timeout=30`. Pooled (PgBouncer) endpoints can break `prisma migrate deploy`, and the schema declares no separate direct URL. Neon computes that scale to zero take a moment to wake, so the first `migrate` run may be slow. Use a Neon branch for test runs. A filled-in `server/.env` is also required (`JWT_SECRET`, GitHub OAuth, AI keys). Compose overrides `DATABASE_URL`, `REDIS_*`, `PORT` and `NODE_ENV` for the containers.
 
@@ -128,7 +143,8 @@ Known limitations:
 - **Repair worker and Docker:** the runtime image has no `docker` CLI and Compose does not mount the host Docker socket (that would grant root on the host). The `repair-worker` can therefore only finish with an `INCONCLUSIVE` result. Run it on a host with Docker, or build an image that adds the CLI and a daemon connection you trust.
 - **Shutdown:** Compose sends `SIGTERM` and waits 10 s; workers wait for the active job to finish. Consider `stop_grace_period` for the workers if jobs are long.
 - **No TLS:** the bundled nginx serves plain HTTP. Put a TLS-terminating proxy in front for anything beyond local use.
-- **Verification status:** `docker compose config` validates the file.
+- **Verification status (14 October 2026):** `docker compose config -q` passes with and without `--profile bundled-db`, fails with the documented messages when `REDIS_PASSWORD` or `server/.env` is missing, and renders `DATABASE_URL` for the bundled database as expected. Images were **not built and the stack was not started** because Docker Hub was unreachable from the audit environment.
+- **Hosted frontend:** the Compose client is for local use. For a frontend hosted from GitHub (Vercel, Netlify, ...) see the root [README](../README.md#deploying-the-frontend-and-connecting-the-github-repository).
 
 ## 7. Release blockers (security and operations)
 
@@ -140,7 +156,7 @@ Before any public deployment: resolve the Compose limitations above; run a clean
 |---|---|---|
 | API exits at start | `JWT_SECRET`, database reachability, Redis reachability (realtime waits for queue events) | fix configuration; do not reset a database holding data |
 | Scan stays `waiting` | scan worker running? Redis settings | start `npm run worker`; inspect job status endpoint |
-| AI error at startup | `OPENROUTER_API_KEY` | set it; the other providers cannot substitute because config import throws |
+| AI error at startup (`No AI provider is configured`) | `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` | set at least one real value; any one is enough |
 | Docker run fails | daemon reachable from the repair worker, image pull possible | record as execution failure; never treat as verified |
 | Verification `INCONCLUSIVE` | tests missing, dependencies absent (no network, no `node_modules`) | stop; improve fixture or test command |
 | PR not created | verification status, token scopes, branch push errors | keep the repair unmerged; inspect redacted logs on a disposable repository |

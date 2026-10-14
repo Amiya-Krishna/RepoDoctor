@@ -12,6 +12,3 @@ coverage/
 bug-test-repo/
 security-test-repo/
 test-generation-repo/
-
-# Local audit report
-/docs/PROJECT_AUDIT_REPORT.md

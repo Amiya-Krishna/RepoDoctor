@@ -12,6 +12,8 @@ Every command, route, port, table and button label below was checked against the
 
 The sandbox blocked `binaries.prisma.sh` (HTTP 403), so the real Prisma client was never generated there. That is why every database-backed flow below is NOT EXECUTED. On a normal network these should work, but nobody has confirmed it yet.
 
+**Re-audit, 14 October 2026.** Repeated in a new sandbox: Docker Hub (`registry-1.docker.io`) and `binaries.prisma.sh` both returned 403, so no image could be pulled and `prisma generate` still failed. Re-run and passing: AT-01 to AT-06, AT-15, AT-16, AT-18 (including `--profile bundled-db`), and the 16 migrations applied with `psql` on PostgreSQL 16. Still not executed: `docker compose build/up`, `prisma generate`, `prisma migrate deploy`, server `tsc`/build, AT-07 to AT-10, every database test.
+
 ---
 
 ## A. Prerequisites
@@ -23,15 +25,15 @@ The sandbox blocked `binaries.prisma.sh` (HTTP 403), so the real Prisma client w
 | Git | any recent version; the workers run `git clone` |
 | PostgreSQL | 16 |
 | Redis | 7 (BullMQ queues and Socket.IO progress events) |
-| Docker | Only for the repair worker (it runs repository tests in a `--network none` container) and for the Compose stack. Not needed for the API, scan worker or client |
-| Network | Outbound HTTPS to `binaries.prisma.sh` during `npm ci` (Prisma engines), to `github.com` / `api.github.com`, and to your AI provider |
+| Docker | Only for the repair worker (it runs repository tests in a `--network none` container) and for the Compose stack (Compose v2+ for `depends_on.required`; checked with Compose v5). Not needed for the API, scan worker or client |
+| Network | Outbound HTTPS to `binaries.prisma.sh` during `npm ci` (Prisma engines), to Docker Hub for Compose image builds, to `github.com` / `api.github.com`, and to your AI provider |
 | Tools used by the test cases | `curl`, `jq`, `openssl`, `psql`, `redis-cli` |
 
 ### Server environment (`server/.env`, created from `server/.env.example`)
 
 | Variable | Needed for | Notes |
 |---|---|---|
-| `DATABASE_URL` | everything | `postgresql://repodoctor:<password>@localhost:5432/repodoctor?schema=public` |
+| `DATABASE_URL` | everything | `postgresql://<user>:<password>@<endpoint>.<region>.aws.neon.tech/<database>?sslmode=require` |
 | `JWT_SECRET` | API start | the API refuses to start without it; use a long random value (the template contains only a placeholder) |
 | `JWT_EXPIRES_IN` | optional | digits + `s`/`m`/`h`/`d` (for example `12h`); anything else falls back to `1d` |
 | `PORT` | API | default `5000` (Compose sets `4000`) |
@@ -53,8 +55,8 @@ You must supply yourself: a GitHub OAuth App (client id/secret), an AI provider 
 ## B. Initial Setup (bash, from the folder that contains `docker-compose.yml`)
 
 ```bash
-# 1. Extract and open
-unzip RepoDoctor-final-verified.zip -d repodoctor && cd repodoctor/RepoDoctor   # adjust if the folder layout differs
+# 1. Open
+ cd RepoDoctor   # adjust if the folder layout differs
 ls                                                                               # expect: client  server  docker-compose.yml  README.md ...
 
 # 2. PostgreSQL 16 and Redis 7 (skip if you already run them).
@@ -121,14 +123,15 @@ cd client && npm run build && npm run preview  # static build in client/dist (EX
 ### Docker Compose (images NOT built or run in verification)
 
 ```bash
-cp server/.env.example server/.env             # fill in; PORT, REDIS_* and TRUST_PROXY are overridden by Compose
-cp .env.example .env                           # root file: set DATABASE_URL (reachable from containers) and REDIS_PASSWORD
-docker compose config -q                       # EXECUTED: exits 0 with both variables set, and fails with the explicit message when DATABASE_URL is empty
-docker compose up --build                      # client on http://localhost:8080 (API only via the nginx /api/ and /socket.io/ proxies)
-docker compose ps                              # server should become "healthy"; client waits for it
+cp server/.env.example server/.env             # fill in; set FRONTEND_URL=http://localhost:8080 and GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback; PORT, DATABASE_URL, REDIS_*, NODE_ENV and TRUST_PROXY are overridden by Compose
+cp .env.example .env                           # root file: set REDIS_PASSWORD and DATABASE_URL (external, e.g. Neon) or POSTGRES_PASSWORD (bundled)
+docker compose config -q                       # EXECUTED: exit 0 with both env files; fails with 'required variable REDIS_PASSWORD is missing a value' or 'env file .../server/.env not found'
+docker compose up --build -d                   # NOT EXECUTED. Client on http://localhost:8080 (API only via the nginx /api/ and /socket.io/ proxies)
+docker compose ps                              # server should become "healthy"; migrate exits 0; client waits for server
+docker compose down                            # keeps volumes; `down -v` deletes them
 ```
 
-Compose does not start PostgreSQL (use `host.docker.internal` or a host IP in `DATABASE_URL`; on Linux add `extra_hosts: ["host.docker.internal:host-gateway"]` to the services that need it). The `repair-worker` service has no Docker CLI and no daemon in its image, so repair jobs there end `INCONCLUSIVE`.
+Bundled PostgreSQL: comment out `DATABASE_URL` in the root `.env`, set `POSTGRES_PASSWORD` (letters, digits, `-`, `_`) and put `--profile bundled-db` after `docker compose` in every command above (including `down`); `docker compose --profile bundled-db config -q` was EXECUTED and passes. Without the profile no `postgres` container exists and `DATABASE_URL` must point to a database reachable from the containers (for a database on the Docker host use `host.docker.internal`; on Linux add `extra_hosts: ["host.docker.internal:host-gateway"]`, which would be a change to `docker-compose.yml`). The `repair-worker` service has no Docker CLI and no daemon in its image, so repair jobs there end `INCONCLUSIVE`.
 
 ---
 
@@ -156,7 +159,7 @@ Run in `server/` unless stated. There is no `npm test`, no test framework and no
 | AT-16 | `cd client && npx tsc -b && npm run build` | – | `✓ built in …` | PASS |
 | AT-17 | `npm audit` in `server/` and `client/` | network | see below | server: 3 high; client: 0 after the lockfile fix |
 | AT-18 | `docker compose config -q` (project root, with `server/.env`, `DATABASE_URL`, `REDIS_PASSWORD` present) | Docker CLI only | exit 0 | PASS |
-| AT-19 | `docker compose build` | Docker daemon + network | all images build | NOT EXECUTED (no daemon) |
+| AT-19 | `docker compose build` | Docker daemon + Docker Hub access | all images build | NOT EXECUTED (14 Oct 2026: daemon started but Docker Hub returned 403) |
 
 Scripts needing API keys, a GitHub token or a Docker daemon (`test:ai`, `test:openrouter`, `test:groq`, `test:gemini`, `test:bug-agent`, `test:security-agent`, `test:test-generation`, `test:fix-agent`, `test:verification-agent`, `test:analysis-pipeline`, `test:docker-runner`, `test:repair-retry`, `test:github-pr`, `test:autonomous-repair`, `test:repair-job-history`, `test:repair-job-pagination`, `test:repair-job-metrics`) are **NOT EXECUTED**. Several spend money or modify GitHub; read each script first. Without keys they stop immediately with `No AI provider is configured…` or `Set ANALYSIS_ID…` — that is the missing-prerequisite message, not a defect.
 
@@ -309,7 +312,7 @@ curl -i -X POST $BASE/github/webhook -H 'Content-Type: application/json' \
 - **PASS if** the difference matches.
 
 ### TC-20 — Compose stack smoke test — NOT EXECUTED (needs Docker)
-1. `docker compose up --build -d`; `docker compose ps` → `redis` and `server` healthy, `migrate` exited with code 0.
+1. `docker compose up --build -d` (add `--profile bundled-db` if used); `docker compose ps` → `redis` and `server` healthy, `migrate` exited with code 0 (`docker compose logs migrate` ends with `All migrations have been successfully applied.`).
 2. `curl -i http://localhost:8080/api/health` → `200` (through nginx).
 3. Open `http://localhost:8080`, log in, start a scan, and confirm live progress without console errors about `/socket.io/`.
 4. `docker compose logs repair-worker` → the worker starts; any repair job ends `INCONCLUSIVE` because the image has no Docker CLI.
@@ -339,7 +342,10 @@ curl -i -X POST $BASE/github/webhook -H 'Content-Type: application/json' \
 | 429 on every request behind a proxy | all clients share the proxy IP | set `TRUST_PROXY=1` (number of proxies) |
 | Live progress never appears behind nginx; browser shows failed `/socket.io/` requests | the nginx config lacks the `/socket.io/` block | use the current `client/nginx.conf` |
 | `docker compose` says `env file …/server/.env not found` | missing file | `cp server/.env.example server/.env` |
-| `docker compose` rejects `DATABASE_URL` / `REDIS_PASSWORD` | variables unset | put them in a root `.env` (`cp .env.example .env`) |
+| `docker compose` rejects `REDIS_PASSWORD` (`required variable ... is missing a value`) | variable unset or empty | put it in a root `.env` (`cp .env.example .env`); with `--profile bundled-db` also set `POSTGRES_PASSWORD`, otherwise `DATABASE_URL` |
+| After GitHub login the browser goes to `localhost:5173` under Compose | `FRONTEND_URL` still has the template value | set `FRONTEND_URL=http://localhost:8080` in `server/.env`, then `docker compose up -d` |
+| Deployed (hosted) frontend cannot log in or connect GitHub | see the symptom table in the root README | [Deploying the frontend](../README.md#deploying-the-frontend-and-connecting-the-github-repository) |
+| Compose image build fails while pulling `node`, `nginx`, `redis` or `postgres` | Docker Hub unreachable (403 in the audit sandbox) | allow `registry-1.docker.io` or use a mirror |
 | Prisma error about OpenSSL / engine not found inside a container | the generated client targets a different OpenSSL | rebuild with the current `server/Dockerfile` (installs `openssl` in the build stage); NOT image-tested |
 | GitHub OAuth cookie missing in a Compose run on plain HTTP | `NODE_ENV=production` marks the state cookie `Secure` | browsers accept it on `localhost`, but not on other plain-HTTP hosts; use HTTPS in front |
 
@@ -360,7 +366,7 @@ pg_ctlcluster 16 main stop                        # as root, if you started it i
 redis-cli shutdown nosave                         # stops a local Redis
 
 # 3. Compose
-docker compose down                               # keeps the redis_data volume; add -v only to delete it
+docker compose down                               # keeps the volumes; add -v only to delete them (redis_data, and postgres_data with --profile bundled-db)
 
 # 4. Build artifacts (safe; regenerated by builds)
 rm -rf server/dist client/dist

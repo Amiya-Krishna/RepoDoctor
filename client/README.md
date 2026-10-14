@@ -16,7 +16,11 @@ There are no unit tests for the client. Registration and login are covered by Pl
 
 ## Configuration
 
-`VITE_API_URL` is the API base URL, default `http://localhost:5000/api`. The Docker build (`client/Dockerfile`) sets it to `/api` and serves the build with nginx, which proxies `/api/` and `/socket.io/` to `http://server:4000`. The Socket.IO connection uses the same origin with `/api` removed.
+`VITE_API_URL` is the API base URL, default `http://localhost:5000/api`. Vite reads it at **build time** and embeds it in the bundle (checked: building with `VITE_API_URL=https://api.example.test/api` embeds that URL; building without it embeds `http://localhost:5000/api`), so a hosted build must set it before building and be redeployed when it changes. It must end in `/api` because the Socket.IO origin is derived by removing that suffix. The Docker build (`client/Dockerfile`) sets it to `/api` and serves the build with nginx, which proxies `/api/` and `/socket.io/` to `http://server:4000`. The Socket.IO connection uses the same origin with `/api` removed.
+
+## Building and deploying
+
+`npm ci && npm run lint && npm run build` writes the static site to `client/dist` (all three passed in the 14 October 2026 audit). When a host builds from the GitHub repository, set its root directory to `client`, build command `npm run build`, output directory `dist`, Node 22, the `VITE_API_URL` variable, and an SPA rewrite to `/index.html`. The API must be hosted separately and allow the frontend origin through `FRONTEND_URL`. Full steps and the symptom table: [root README, Deploying the frontend](../README.md#deploying-the-frontend-and-connecting-the-github-repository).
 
 ## What the UI does
 

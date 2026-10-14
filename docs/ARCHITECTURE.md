@@ -21,9 +21,9 @@ The defensible product claim is: *RepoDoctor attempts to detect selected classes
 | Execution | `docker run` through `child_process.execFile` | `server/src/execution/docker.runner.ts` |
 | GitHub | OAuth, REST (axios), git over HTTPS, webhooks | `server/src/github/`, `server/src/services/github.service.ts` |
 | Memory/RAG | Lexical hashed vectors in PostgreSQL JSON | `server/src/rag/`, `server/src/services/repository-memory.service.ts` |
-| Deployment | `docker-compose.yml` (see defects in [Operations](OPERATIONS_SECURITY.md)) | repository root |
+| Deployment | `docker-compose.yml` (limitations in [Operations §6](OPERATIONS_SECURITY.md#6-docker-compose-deployment)); static frontend host steps in the root [README](../README.md#deploying-the-frontend-and-connecting-the-github-repository) | repository root |
 
-Not present: refresh tokens, CI/CD workflows, AWS deployment, a vector database, neural embeddings, Prettier/ESLint for the server.
+Not present: refresh tokens, CI/CD workflows, hosted-frontend configuration (`vercel.json`, `netlify.toml`, ...), AWS deployment, a vector database, neural embeddings, Prettier/ESLint for the server.
 
 ## 3. System diagram
 
@@ -196,7 +196,7 @@ Limitations that affect the architecture:
 3. **Context selection** is the first 30 JS/TS files in traversal order, not finding-relevant files; the Fix Agent does not receive retrieved memory.
 4. **Memory** is lexical retrieval, rebuilt per scan, not filtered by branch/commit.
 5. **Security modules not connected:** token encryption, the strict command policy, the untrusted-context wrapper and the audit-event service. See [Operations and security §3](OPERATIONS_SECURITY.md#3-security-control-status).
-6. **Deployment:** Compose is development-oriented and, as written, would not start a working stack (listed in [Operations §6](OPERATIONS_SECURITY.md#6-docker-compose-reality-check)).
+6. **Deployment:** Compose is development-oriented. `docker compose config` validates, but the images have not been built or run in any verification environment, and the repair worker has no Docker daemon there (see [Operations §6](OPERATIONS_SECURITY.md#6-docker-compose-deployment)). No hosted-frontend configuration exists in the repository; the frontend must be configured by hand (root directory `client`, build-time `VITE_API_URL`).
 7. `express-rate-limit` is declared in `server/package.json` and covered by `npm run test:app`.
 
 ## 10. Architecture acceptance criteria

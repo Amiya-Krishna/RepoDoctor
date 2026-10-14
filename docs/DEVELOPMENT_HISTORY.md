@@ -31,7 +31,7 @@ The previous version of this file was a single table and a plan for Days 25–30
 | Day 25 (RAG/memory) "not evidenced". | `server/src/rag/`, `server/src/services/repository-memory.service.ts`, the `RepositoryMemoryChunk` model, migration `20261010190000_repository_memory_chunks` and a call in `analysis.pipeline.ts` exist. It is **lexical hashed-vector retrieval**, not neural-embedding RAG (see Day 25). |
 | Day 26 benchmark "not evidenced". | An evaluator, a CLI and a 5-case seeded fixture exist. **No measured results exist** (see Day 26). |
 | Day 27: token encryption, rate limiting, audit logging "gaps". | Token encryption module, rate-limit middleware, a command policy, an untrusted-context helper and an audit-event table all exist, but several are **not wired in** (see Day 27). |
-| Day 28: Compose "has hard-coded credentials and publishes DB/cache ports". | The current `docker-compose.yml` requires `POSTGRES_PASSWORD` and `REDIS_PASSWORD` and publishes no database/cache ports. Remaining limitations are in Day 28. |
+| Day 28: Compose "has hard-coded credentials and publishes DB/cache ports". | The current `docker-compose.yml` requires `REDIS_PASSWORD` (and `POSTGRES_PASSWORD` with the optional `bundled-db` profile) and publishes no database/cache ports. Remaining limitations are in Day 28. |
 | Days 1–24 "present". | Several days carry caveats not previously recorded, e.g. generated tests are never persisted by the pipeline (Day 12) and `express-rate-limit` was imported but not declared in `package.json` (Day 27; declared on 11 October 2026). |
 
 ### 1.4 Summary table
@@ -473,11 +473,11 @@ GitHub integration → Repository ingestion → Repository context → Analysis
 - **Objective:** a reproducible deployment of frontend, API, database, Redis/BullMQ, workers and isolated test execution.
 - **Context:** packages Days 1–27.
 - **Planned work:** Dockerize; document variables, ports, health checks, steps; separate development from production; document AWS only if performed.
-- **Actual implementation:** `docker-compose.yml` defines `postgres` (16, health check, volume, required `POSTGRES_PASSWORD`), `migrate` (one-shot `prisma migrate deploy`), `redis` (7, append-only, required `REDIS_PASSWORD`), `server` (port 4000, health check), `scan-worker`, `repair-worker` and `client` (nginx on host port 8080 proxying `/api/` and `/socket.io/` to `server:4000`). No database or cache port is published. A multi-stage `server/Dockerfile` builds with `tsc` and runs `dist/server.js` as a non-root user; `client/Dockerfile` builds the SPA and serves it with nginx.
+- **Actual implementation:** `docker-compose.yml` defines `postgres` (16, health check, volume; optional, only with `--profile bundled-db`, which requires `POSTGRES_PASSWORD`), `migrate` (one-shot `prisma migrate deploy`), `redis` (7, append-only, required `REDIS_PASSWORD`), `server` (port 4000, health check), `scan-worker`, `repair-worker` and `client` (nginx on host port 8080 proxying `/api/` and `/socket.io/` to `server:4000`). No database or cache port is published. A multi-stage `server/Dockerfile` builds with `tsc` and runs `dist/server.js` as a non-root user; `client/Dockerfile` builds the SPA and serves it with nginx.
 - **Files and components:** `docker-compose.yml`, `server/Dockerfile`, `client/Dockerfile`, `client/nginx.conf`, `.dockerignore`.
 - **Technical workflow:** `postgres` → `migrate` → `server` / `scan-worker` / `repair-worker`; `client` proxies to `server`.
 - **Result:** Partially implemented.
-- **Known gaps:** the repair worker has no Docker daemon in Compose (see [Operations §6](OPERATIONS_SECURITY.md#6-docker-compose-deployment)), no TLS, secrets management, backups or rollback procedure, and no CI/CD files.
+- **Known gaps:** the repair worker has no Docker daemon in Compose (see [Operations §6](OPERATIONS_SECURITY.md#6-docker-compose-deployment)), no TLS, secrets management, backups or rollback procedure, and no CI/CD files or hosted-frontend configuration. Documentation audit of 14 October 2026: `docker compose config -q` passes (also with `--profile bundled-db`), the client lints and builds, the 16 migrations apply with `psql` on PostgreSQL 16; images were not built because Docker Hub was unreachable, so `up` is still unverified. The `postgres` service is optional (`bundled-db` profile) and `DATABASE_URL` may point to an external database such as Neon.
 - **Connection to Day 29:** the documentation must describe this honestly.
 
 ### Day 29 — Resume and GitHub polish
