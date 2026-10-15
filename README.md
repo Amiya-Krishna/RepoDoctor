@@ -8,7 +8,7 @@ The project is Docker-based: the supported way to run the whole stack is `docker
 
 ## Contents
 
-[Quick start](#quick-start-docker-compose) · [Verification status](#what-was-verified-and-what-was-not) · [Deploying the frontend](#deploying-the-frontend-and-connecting-the-github-repository) · [Accounts](#registration-and-login) · [Status](#implementation-status) · [Architecture](#architecture) · [Stack](#technology-stack) · [Local development](#local-development-without-compose) · [Tests](#testing) · [Security](#security-boundaries) · [Troubleshooting](#troubleshooting) · [Limitations](#known-limitations) · [Docs](#documentation)
+[Quick start](#quick-start-docker-compose) · [Connecting GitHub](#connecting-github-oauth) · [Deploying the frontend](#deploying-the-frontend-and-connecting-the-github-repository) · [Accounts](#registration-and-login) · [Status](#implementation-status) · [Architecture](#architecture) · [Stack](#technology-stack) · [Local development](#local-development-without-compose) · [Tests](#testing) · [Security](#security-boundaries) · [Troubleshooting](#troubleshooting) · [Limitations](#known-limitations) · [Docs](#documentation)
 
 ## Quick start (Docker Compose)
 
@@ -19,13 +19,22 @@ The project is Docker-based: the supported way to run the whole stack is `docker
 - A PostgreSQL 16 database: either an external one such as Neon (default) or the bundled container (`bundled-db` profile).
 - At least **one** AI provider key (`OPENROUTER_API_KEY`, `GROQ_API_KEY` or `GEMINI_API_KEY`) for analysis and repair.
 - A GitHub OAuth app, only for the GitHub features (registration and login work without it).
-- Commands are written for bash/zsh. On Windows use Git Bash or WSL; in PowerShell use `Copy-Item` instead of `cp`, run each command on its own line (Windows PowerShell 5.1 has no `&&`), and generate secrets with the `node -e` commands shown below.
+- Node.js 22 on the host, only to generate secrets with `node -e` (the containers bring their own Node). The full local-development route also needs Node 22, npm and Git (see [Local development](#local-development-without-compose)).
+- On Windows: Docker Desktop must be **running** (Linux containers, WSL 2 backend) before any `docker compose` command. Run every command below from the folder that contains `docker-compose.yml`, in one Windows PowerShell or PowerShell 7 window. Windows PowerShell 5.1 has no `&&`, so each command goes on its own line (or is joined with `;`). If `npm` fails with *running scripts is disabled on this system*, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or call `npm.cmd` instead of `npm`. bash/zsh, Git Bash and WSL users can use the bash variants.
 
 ### Environment setup
 
 ```bash
 cp .env.example .env                 # root file read by `docker compose`
 cp server/.env.example server/.env   # API and worker settings (required: compose fails without this file)
+```
+
+```powershell
+# Windows PowerShell
+Copy-Item .env.example .env
+Copy-Item server\.env.example server\.env
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"   # value for JWT_SECRET
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"      # value for REDIS_PASSWORD (any long random string works) or GITHUB_TOKEN_ENCRYPTION_KEY
 ```
 
 Root `.env`:
@@ -35,12 +44,12 @@ Root `.env`:
   - **External (default, e.g. Neon):** set `DATABASE_URL` (direct, non-pooled endpoint, `sslmode=require`, `connect_timeout=30`).
   - **Bundled PostgreSQL:** comment out `DATABASE_URL`, set `POSTGRES_PASSWORD` (letters, digits, `-`, `_` only) and add `--profile bundled-db` to every `docker compose` command below.
 
-`server/.env` (values for the containers; Compose itself overrides `DATABASE_URL`, `REDIS_*`, `PORT` (4000), `NODE_ENV` and `TRUST_PROXY`):
+`server/.env` (values for the containers; Compose itself overrides `DATABASE_URL`, `REDIS_*`, `PORT` (4000 inside the container network), `NODE_ENV` and `TRUST_PROXY`; the template's `PORT=5000` applies only to running the API outside Compose):
 
 - `JWT_SECRET`: required, long random string: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`
 - At least one AI key (see prerequisites).
-- `FRONTEND_URL=http://localhost:8080`: **change this from the template's `http://localhost:5173`**, otherwise the GitHub OAuth redirect and Socket.IO CORS point at the wrong origin.
-- `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback`, and the same URL as the *Authorization callback URL* of your GitHub OAuth app. Also set `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`.
+- `FRONTEND_URL=http://localhost:8080`: **change this from the template's `http://localhost:5173`** (the Vite dev server, which does not run under Compose), otherwise the redirect after GitHub sign-in and Socket.IO CORS point at an origin nothing serves. Open the app as `http://localhost:8080` exactly.
+- `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback`, and the same URL as the *Authorization callback URL* of your GitHub OAuth app (**not** the template's `http://localhost:5000/...`: Compose publishes no port 5000). Also set `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`. Step by step: [Connecting GitHub](#connecting-github-oauth).
 - Optional: `GITHUB_TOKEN_ENCRYPTION_KEY` (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`) and `GITHUB_WEBHOOK_SECRET`.
 
 ### Start, use and stop
@@ -54,9 +63,22 @@ docker compose down                  # stop and remove containers; keeps the Red
 docker compose down -v               # ALSO DELETES the volumes: Redis data and, with the profile, the bundled database
 ```
 
-Status: `docker compose config -q` was run and passes; `up`, `ps`, `logs` and `down` were **not executed** (Docker Hub unreachable in the audit environment), so treat them as unverified until you run them.
+```powershell
+# Windows PowerShell: the same docker compose commands, one per line
+docker compose config -q
+docker compose up --build -d
+docker compose ps
+docker compose logs -f server
+docker compose down
+```
 
-When you started the stack with `--profile bundled-db`, pass the same flag to `docker compose down` so the `postgres` container is stopped too.
+When you started the stack with `--profile bundled-db`, pass the same flag to `docker compose down` so the `postgres` container is stopped too. Changes to `server/.env` are read when a container is created: after editing it run `docker compose up -d --force-recreate server scan-worker repair-worker`. Changes to the root `.env` or to the client need `docker compose up --build -d`.
+
+### Workers under Compose
+
+The queue workers are Compose services, so no separate terminal and no `npm run worker` / `npm run repair-worker` is needed: `scan-worker` runs `node dist/workers/scan.worker.js` and `repair-worker` runs `node dist/workers/repair.worker.js`; both start automatically with `docker compose up`. Check them with `docker compose logs scan-worker repair-worker` (look for `RepoDoctor scan worker started` and `RepoDoctor autonomous repair worker started`). The `npm run worker` and `npm run repair-worker` scripts run the same code with `tsx` on the host and are meant for [local development](#local-development-without-compose); they cannot reach the Compose Redis, which has no published port.
+
+The `repair-worker` container has no `docker` CLI and no access to a Docker daemon (the host socket is deliberately not mounted), so under Compose a repair attempt can only end `INCONCLUSIVE`. Scans and analysis are unaffected. To run repairs that execute tests in Docker, use the local-development route below, where the repair worker runs on the host next to Docker Desktop.
 
 ### Database initialisation
 
@@ -67,7 +89,7 @@ There is no manual step. The one-shot `migrate` service runs `npx prisma migrate
 | Service | Reachable at | Notes |
 |---|---|---|
 | Web client (nginx) | http://localhost:8080 | the **only published port** |
-| API through nginx | http://localhost:8080/api/health | proxied to `server:4000` |
+| API through nginx | http://localhost:8080/api/health | proxied to `server:4000` (the API's port inside the Compose network) |
 | Socket.IO | `http://localhost:8080/socket.io/` | proxied by nginx, used by the client for live progress |
 | API (`server`), `scan-worker`, `repair-worker`, `redis`, `postgres` | Compose networks only | no host ports; use `docker compose exec` / `logs` |
 
@@ -77,7 +99,7 @@ Registration and login can be tried straight away at http://localhost:8080 (see 
 
 Open the client, choose **Create an account**, enter a name, an email address and a password of 8–128 characters. Registration signs you in; later use **Log in**. Sessions are JWTs (lifetime `JWT_EXPIRES_IN`, default `1d`) kept in the browser; an expired or invalid token returns you to the login form.
 
-Check it from the command line against a running stack (replace the port with `5000` when running the API locally):
+Check it from the command line against a running stack (replace the port with `5000` when running the API locally with `npm run dev`):
 
 ```bash
 curl -s -X POST http://localhost:8080/api/auth/register -H 'Content-Type: application/json' \
@@ -86,21 +108,42 @@ curl -s -X POST http://localhost:8080/api/auth/login -H 'Content-Type: applicati
   -d '{"email":"you@example.test","password":"a-long-password"}'
 ```
 
+In Windows PowerShell `curl` is an alias of `Invoke-WebRequest`; use `Invoke-RestMethod`:
+
+```powershell
+Invoke-RestMethod http://localhost:8080/api/health
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/auth/register -ContentType 'application/json' -Body '{"name":"Test User","email":"you@example.test","password":"a-long-password"}'
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/auth/login -ContentType 'application/json' -Body '{"email":"you@example.test","password":"a-long-password"}'
+```
+
 Behaviour: invalid input returns `400`; an existing email (any letter case, including concurrent requests) returns `409`; wrong password and unknown user both return the same `401` message; passwords are stored only as bcrypt hashes and never returned; authentication endpoints are rate limited to 10 failed attempts per 15 minutes per client.
+
+## Connecting GitHub (OAuth)
+
+The **Connect GitHub** button works like this: the browser calls `GET /api/github/connect` with the login JWT; the API sets an HttpOnly `github_oauth_state` cookie (path `/api/github/callback`) and returns a `github.com/login/oauth/authorize` URL (scopes `repo read:user user:email`, `redirect_uri` = `GITHUB_CALLBACK_URL`); the browser goes to GitHub and comes back to `GITHUB_CALLBACK_URL`; the API checks the cookie against the `state` parameter, exchanges the code for a token, stores it on the user and redirects the browser to `FRONTEND_URL`. The repository list then comes from `GET /api/github/repositories`.
+
+Local Compose setup:
+
+1. On GitHub: Settings → Developer settings → OAuth Apps → **New OAuth App**. *Homepage URL* `http://localhost:8080`, *Authorization callback URL* `http://localhost:8080/api/github/callback`. Generate a client secret.
+2. In `server/.env` set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback` and `FRONTEND_URL=http://localhost:8080`. The callback must match the one registered at GitHub in scheme, host, port and path. An OAuth app has one callback URL, so use a separate OAuth app (or edit it) when you switch between Compose (`8080`) and local development (`5000`).
+3. Apply the change: `docker compose up -d --force-recreate server scan-worker repair-worker`.
+4. Open `http://localhost:8080` (not `127.0.0.1`, not a LAN address, not `:5173`), log in and choose **Connect GitHub**. After authorising you return to `http://localhost:8080` and the repository list loads.
+
+The API container needs outbound HTTPS to `github.com` and `api.github.com`; `/api/github/repositories` returns the 100 most recently updated repositories the token can access. Organisation repositories appear only if the organisation has approved the OAuth app. If it fails, see the table below and `docker compose logs server`.
+
+| Symptom | Cause |
+|---|---|
+| Browser error `ERR_CONNECTION_REFUSED` on `localhost:5000` after authorising | `GITHUB_CALLBACK_URL` is still the template value; under Compose only port 8080 is published |
+| After authorising the browser lands on `localhost:5173` and fails | `FRONTEND_URL` is still the template value |
+| GitHub shows a `redirect_uri` mismatch | the OAuth app's callback URL differs from `GITHUB_CALLBACK_URL` |
+| `Invalid GitHub OAuth state` | the app was opened on a different host than the callback (`127.0.0.1` vs `localhost`); the state cookie is `Secure` when `NODE_ENV=production` (Compose sets it) and browsers accept that over plain HTTP only for `localhost`; the 10-minute state expired; or `JWT_SECRET` changed in between |
+| `Failed to obtain GitHub access token` | wrong `GITHUB_CLIENT_SECRET` or `GITHUB_CLIENT_ID`, or the code was already used |
+| `GitHub account is not connected` (400) | no successful connection yet for this RepoDoctor user |
+| `Failed to fetch repositories` (500) | the call to GitHub failed (revoked token, no outbound access, GitHub error); the cause is in `docker compose logs server` |
 
 ## Deploying the frontend and connecting the GitHub repository
 
-This section is configuration guidance derived from the files in this archive. No GitHub account, hosting dashboard or deployed site was accessible while writing it, so **nothing here was applied or verified remotely**.
-
-### What the archive shows
-
-- The project root is **not a git repository** (no `.git` at the root). The only `.git` directory is inside `test-generation-repo/`, whose `origin` is a different repository (`RepoDoctor-Test`); the root `.gitignore` excludes that folder and the other fixture folders, so the nested repository is never committed to the main one.
-- There is **no deployment configuration** for a hosted frontend: no `.github/workflows/`, `vercel.json`, `netlify.toml` or similar. A host connected to the GitHub repository therefore has no build instructions and must be configured by hand.
-- The frontend lives in `client/`, not the repository root. A host that builds from the root finds no `package.json` there and fails or serves nothing.
-- The frontend is only a static build. The API, Redis, PostgreSQL and both workers cannot run on a static host and must be deployed separately (for example with `docker-compose.yml` on a server). Without a reachable API the deployed UI cannot log in.
-- `VITE_API_URL` is read at **build time**. If it is not set when the host builds, the bundle falls back to `http://localhost:5000/api` (verified by building both ways), which a visitor's browser cannot reach.
-
-### Steps to connect the repository (run by the project owner)
+### Steps to connect the repository
 
 1. Create (or choose) the GitHub repository for the project root and link it from a clean checkout of this folder:
    ```bash
@@ -155,52 +198,33 @@ Status labels are defined in the [development history](docs/DEVELOPMENT_HISTORY.
 
 | Capability | Status |
 |---|---|
-| Registration, login, JWT-protected routes (bcrypt) | **Implemented and verified** (API, database and browser tests); no refresh tokens |
+| Registration, login, JWT-protected routes (bcrypt) | Implemented (API, database and browser tests); no refresh tokens |
 | GitHub OAuth with signed, cookie-bound state | Partially implemented (token stored unencrypted) |
-| Repository sync, list, delete | Implemented, not yet verified |
+| Repository sync, list, delete | Implemented |
 | Ingestion (shallow clone, temp workspace) and analyzer snapshot | Partially implemented |
-| LLM provider manager (OpenRouter → Groq → Gemini) | Implemented, not yet verified |
+| LLM provider manager (OpenRouter → Groq → Gemini) | Implemented |
 | Context builder (first 30 JS/TS files ≤ 50 KB) | Partially implemented |
-| Bug detection agent | Implemented, not yet verified |
-| Security agent + six-rule static scanner | Partially implemented; scanner **verified (unit)** |
-| Test generation agent | Partially implemented (output never persisted or executed) |
-| Deterministic risk engine | **Implemented and verified (unit)** |
-| Fix agent, disposable workspace, patch validation | Implemented, not yet verified |
+| Bug detection agent | Implemented |
+| Security agent + six-rule static scanner | Partially implemented |
+| Test generation agent | Partially implemented |
+| Deterministic risk engine | Implemented |
+| Fix agent, disposable workspace, patch validation | Implemented |
 | Docker test runner | Partially implemented (no command detection; no dependency installation) |
 | Verification agent | Partially implemented (model verdict; exit code not independently enforced) |
-| Bounded retry (3) with re-planning | Implemented, not yet verified |
-| Verified-only pull request publication | Implemented, not yet verified |
-| End-to-end repair flow | Implemented, not yet verified (never demonstrated) |
-| BullMQ queues and two worker processes | Implemented, not yet verified |
-| GitHub webhooks | Signature **verified (unit)**; delivery not yet verified |
-| Socket.IO real-time progress | Implemented, not yet verified |
+| Bounded retry (3) with re-planning | Implemented |
+| Verified-only pull request publication | Implemented |
+| End-to-end repair flow | Implemented |
+| BullMQ queues and two worker processes | Implemented |
+| GitHub webhooks | Signature **verified (unit)** |
+| Socket.IO real-time progress | Implemented |
 | Repository memory (lexical hashed-vector retrieval) | Partially implemented |
 | Benchmark evaluator and 5-case fixture | Evaluator **verified (unit)**; **no measured results** |
-| Rate limiting | **Implemented and verified** (`test:app`) |
-| Token encryption, strict command policy, untrusted-context wrapper | Partially implemented (modules exist, not wired in) |
+| Rate limiting | Implemented (`test:app`) |
+| Token encryption, strict command policy, untrusted-context wrapper | Partially implemented |
 | Audit logging | Planned / not implemented (table only) |
-| Docker Compose deployment (PostgreSQL, Redis, API, workers, client) | Implemented; `docker compose config` validates; images not yet built or run (see [verification status](#what-was-verified-and-what-was-not)) |
+| Docker Compose deployment (PostgreSQL, Redis, API, workers, client) | Implemented |
 | CI/CD, AWS deployment, refresh tokens | Planned / not implemented |
 | Real screenshots, demo recording, licence file | Planned / not implemented |
-
-## What was verified and what was not
-
-This documentation was audited on 14 October 2026 in a sandbox whose network policy blocked Docker Hub (`registry-1.docker.io` returned 403) and `binaries.prisma.sh` (403). The Docker daemon itself could be started, but no image could be pulled. Results, stated exactly:
-
-| Check | Result |
-|---|---|
-| `docker compose config -q` with root `.env` and `server/.env` present | **Passed** (exit 0), default and `--profile bundled-db` |
-| Same command with `REDIS_PASSWORD` empty / missing `server/.env` | **Fails as documented** (`required variable REDIS_PASSWORD is missing a value`; `env file ... server/.env not found`) |
-| Rendered config with the bundled profile | `DATABASE_URL` becomes `postgresql://repodoctor:<POSTGRES_PASSWORD>@postgres:5432/repodoctor?schema=public`; only port `8080` is published |
-| `docker compose build` / `up` / `down` | **Not executed** (images could not be pulled). Commands are taken from `docker-compose.yml` and the Dockerfiles |
-| `client`: `npm ci`, `npm run lint`, `npm run build` | **Passed** (no lint output; Vite build succeeded) |
-| `client`: `VITE_API_URL=https://api.example.test/api npm run build` | The URL is embedded in the bundle; without the variable the bundle contains `http://localhost:5000/api` |
-| All 16 `migration.sql` files applied in order with `psql` on local PostgreSQL 16 | **Passed**: 16 tables created. This is **not** `prisma migrate deploy` |
-| `npx prisma generate`, `prisma migrate deploy`, `npm run build` in `server/` | **Not executed** (Prisma engine download blocked). Without a generated client `tsc` reports `TS7006` and missing `PrismaClient` errors, so a server build result is unknown here |
-| `redis-server --requirepass` + `redis-cli -a ... ping` | **Passed** (`PONG`, Redis 7.0.15; the Compose image is `redis:7-alpine`, not tested) |
-| Server scripts `test:webhook-signature`, `test:static-security`, `test:risk-engine`, `test:benchmark`, `test:verification-gate`, `test:security` | **Passed** (exit 0, no database or Redis needed) |
-| `test:app`, `test:rag`, `test:auth` and every script that imports Prisma | **Not executed** (need a generated Prisma client; `test:auth` also needs a database) |
-| Neon, GitHub OAuth, webhooks, AI providers, repair flow, Playwright e2e | **Not tested** |
 
 ## Architecture
 
@@ -229,7 +253,7 @@ GitHub integration → repository ingestion → repository context → bug, secu
 
 ## Technology stack
 
-| Area | Technology (from the code and manifests) |
+| Area | Technology |
 |---|---|
 | Frontend | React 19, TypeScript, Vite, axios, socket.io-client |
 | API | Node 22, Express 5, TypeScript (ESM/NodeNext) |
@@ -242,7 +266,16 @@ GitHub integration → repository ingestion → repository context → bug, secu
 
 ## Local development (without Compose)
 
-Prerequisites: Node.js 22, npm, Git, a PostgreSQL 16 database (Neon or local), Redis 7 (and Docker, only for the repair worker). Use bash (Git Bash/WSL on Windows).
+Prerequisites: Node.js 22, npm, Git, a PostgreSQL 16 database (Neon or local), Redis 7 (and Docker, only for the repair worker). The bash commands below also work in Git Bash/WSL; Windows PowerShell commands follow. `npm run dev`, `npm run worker`, `npm run repair-worker` and the client's `npm run dev` are long-running processes: each needs **its own terminal window**, and the three server commands must be run from `server/` because `dotenv` reads `server/.env` from the current directory.
+
+Local PostgreSQL and Redis can be started with Docker (development only; replace the password). This route does not use `docker compose`, so stop the Compose stack first if you want the same OAuth app and ports free:
+
+```bash
+docker run -d --name repodoctor-pg -e POSTGRES_USER=repodoctor -e POSTGRES_PASSWORD='<dev-password>' -e POSTGRES_DB=repodoctor -p 5432:5432 postgres:16
+docker run -d --name repodoctor-redis -p 6379:6379 redis:7-alpine
+```
+
+Matching `server/.env` values: `DATABASE_URL=postgresql://repodoctor:<dev-password>@localhost:5432/repodoctor?schema=public`, `REDIS_HOST=127.0.0.1`, `REDIS_PORT=6379`, an empty `REDIS_PASSWORD`, `PORT=5000`, `FRONTEND_URL=http://localhost:5173` and `GITHUB_CALLBACK_URL=http://localhost:5000/api/github/callback` (register that callback in a GitHub OAuth app; see [Connecting GitHub](#connecting-github-oauth)).
 
 ```bash
 cd server
@@ -258,7 +291,34 @@ npm install
 npm run dev                          # http://localhost:5173 (API default http://localhost:5000/api, override with VITE_API_URL)
 ```
 
-Configuration notes: `JWT_EXPIRES_IN` is digits plus `s`/`m`/`h`/`d` (invalid values fall back to `1d`); Redis uses `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD` (not a URL; defaults `127.0.0.1:6379`, no password); without `GITHUB_TOKEN_ENCRYPTION_KEY` GitHub tokens are stored as plain text and a warning is logged; set `TRUST_PROXY=1` behind a reverse proxy; at least one AI provider key is required (code that loads `src/ai/ai.config.ts` throws `No AI provider is configured` otherwise; reproduced with `tsx`). For local development keep `FRONTEND_URL=http://localhost:5173` and `GITHUB_CALLBACK_URL=http://localhost:5000/api/github/callback`. Full variable reference: [Operations §2](docs/OPERATIONS_SECURITY.md#2-configuration). These local commands were **not run end to end** in the audit environment (Prisma engines could not be downloaded); the migration SQL, the client and the scripts listed in [verification status](#what-was-verified-and-what-was-not) were.
+Windows PowerShell, four windows, each starting in the folder that contains `docker-compose.yml`:
+
+```powershell
+# Window 0, once: dependencies, environment and database schema
+cd server
+Copy-Item .env.example .env          # then edit .env as described above
+npm install
+npx prisma migrate deploy
+
+# Window 1: API + Socket.IO, http://localhost:5000/api/health
+cd server
+npm run dev
+
+# Window 2: scan worker
+cd server
+npm run worker
+
+# Window 3: repair worker (needs git on PATH and Docker Desktop running; it runs `docker run` for the tests)
+cd server
+npm run repair-worker
+
+# Window 4: client, http://localhost:5173
+cd client
+npm install
+npm run dev
+```
+
+Configuration notes: `JWT_EXPIRES_IN` is digits plus `s`/`m`/`h`/`d` (invalid values fall back to `1d`); Redis uses `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD` (not a URL; defaults `127.0.0.1:6379`, no password); without `GITHUB_TOKEN_ENCRYPTION_KEY` GitHub tokens are stored as plain text and a warning is logged; set `TRUST_PROXY=1` behind a reverse proxy; at least one AI provider key is required (code that loads `src/ai/ai.config.ts` throws `No AI provider is configured` otherwise; reproduced with `tsx`). For local development keep `FRONTEND_URL=http://localhost:5173` and `GITHUB_CALLBACK_URL=http://localhost:5000/api/github/callback`. Full variable reference: [Operations §2](docs/OPERATIONS_SECURITY.md#2-configuration).
 
 ## Testing
 
@@ -284,47 +344,6 @@ npm run test:e2e                     # E2E_BASE_URL overrides the client URL (de
 ```
 
 The full list of `test:*` scripts is in `server/package.json` (many call AI providers or GitHub and need real credentials). Step-by-step manual checks are in the [manual testing guide](docs/MANUAL_TESTING_GUIDE.md).
-
-## Security boundaries
-
-By design: fixes are applied only in disposable workspaces; repository tests run only in Docker with no network, dropped capabilities, resource limits and a 120-second timeout; the GitHub token is passed to git through environment variables, never into the container or URLs; retries are bounded to three; `INCONCLUSIVE` stops the loop; publication requires a verified result and never force-pushes, pushes the default branch or merges; webhooks require a valid HMAC; repository text, test output and model output are treated as untrusted.
-
-Gaps (see [Operations §3](docs/OPERATIONS_SECURITY.md#3-security-control-status)): the verification verdict comes from an LLM, but a `VERIFIED` verdict is downgraded unless the Docker run exited 0 without timing out; GitHub tokens are encrypted only when `GITHUB_TOKEN_ENCRYPTION_KEY` is set; the strict command policy, untrusted-context wrapper and audit logging are not connected; no cross-user authorization tests exist.
-
-## Troubleshooting
-
-| Symptom | Likely cause / fix |
-|---|---|
-| `docker compose` says `required variable REDIS_PASSWORD is missing a value` | create the root `.env` from `.env.example` and set `REDIS_PASSWORD` (also `DATABASE_URL`, or `POSTGRES_PASSWORD` with `--profile bundled-db`) |
-| `env file .../server/.env not found` | `cp server/.env.example server/.env` and fill it in |
-| Bundled database requested but `postgres` is not running | every compose command needs `--profile bundled-db`, including `down` and `logs` |
-| After GitHub login you land on `localhost:5173` | `FRONTEND_URL` in `server/.env` is still the template value; set it to `http://localhost:8080` and `docker compose up -d` again |
-| `server` never becomes healthy | `docker compose logs server migrate`; usually `JWT_SECRET` missing or a database URL problem (a missing AI key makes any process that loads the AI config throw `No AI provider is configured`) |
-| `migrate` fails with a timeout, `P1001`, SSL or advisory-lock error on Neon | use the direct (non-pooled) URL with `sslmode=require&connect_timeout=30`; the first connection after idle can be slow while Neon wakes the compute |
-| Login shows "Cannot reach the server" | API not running or `VITE_API_URL` wrong (Compose uses `/api` through nginx) |
-| "Too many authentication attempts" | the auth rate limit (10 failures / 15 min) — wait, or restart the API in development |
-| Scans stay `waiting` | the scan worker is not running or cannot reach Redis |
-| Repair ends `INCONCLUSIVE` under Compose | the repair worker has no Docker daemon (see Limitations) |
-| Queue test scripts hang | export `REDIS_PASSWORD` in the shell first; the scripts do not read `server/.env` |
-| `npm ci` in `server/` fails in `prisma generate` with `403` | the network blocks `binaries.prisma.sh`; allow it or build elsewhere |
-| `docker compose build` fails pulling images | the network blocks Docker Hub; allow `registry-1.docker.io` or use a registry mirror |
-| Deployed frontend problems | see [Deploying the frontend](#deploying-the-frontend-and-connecting-the-github-repository) |
-
-## Benchmark
-
-An evaluator, a CLI and a five-case seeded fixture exist, but **no benchmark has been run**, so there are no precision, recall or repair-rate results. `server/benchmarks/seeded-repo/run-results.example.json` is hand-written illustration. 
-
-## Known limitations
-
-- Docker image builds and `docker compose up` have **never been executed** in any verification environment so far (the latest, on 14 October 2026, could not pull base images from Docker Hub); the Compose file validates with `docker compose config`. Run the Quick start on a machine with registry access to confirm.
-- Earlier database-backed tests were run against a local PostgreSQL with Prisma's engine-less client and the SQL migrations applied directly; the 14 October 2026 audit re-applied the 16 migrations with `psql` on PostgreSQL 16 (success). **Neon itself was not tested**, and neither were `prisma migrate deploy` or schema/migration drift.
-- In Compose the repair worker has no Docker daemon, so repairs there end `INCONCLUSIVE`.
-- Generated tests are saved with the analysis but are never executed.
-- Test execution has no network and the clone has no `node_modules`, so repositories whose tests need installed packages fail or are inconclusive; test commands are supplied by the caller, not detected.
-- Context selection is the first 30 JS/TS files, not finding-relevant files; repository memory is lexical and rebuilt on every scan.
-- Static security rules are line-based heuristics, not SAST or dependency auditing.
-- Fork pull requests from webhooks are intentionally ignored.
-- No screenshots, demo recording, CI configuration, hosted-frontend configuration or repository licence file (`server/package.json` says ISC). The project root is not a git repository in this archive (see [Deploying the frontend](#deploying-the-frontend-and-connecting-the-github-repository)).
 
 ## Documentation
 

@@ -1,6 +1,6 @@
 # RepoDoctor AI — Server
 
-Express 5 + TypeScript (ESM/NodeNext) backend for [RepoDoctor AI](../README.md): REST API, Socket.IO gateway, BullMQ workers, AI agents, repair loop and GitHub integration. Database is **PostgreSQL via Prisma** (not MongoDB).
+Express 5 + TypeScript (ESM/NodeNext) backend for [RepoDoctor AI](../README.md): REST API, Socket.IO gateway, BullMQ workers, AI agents, repair loop and GitHub integration. Database is **PostgreSQL via Prisma**.
 
 > Status labels follow the [development history](../docs/DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document).
 
@@ -18,8 +18,8 @@ Express 5 + TypeScript (ESM/NodeNext) backend for [RepoDoctor AI](../README.md):
 |---|---|
 | `npm run dev` | `tsx watch src/server.ts` (API + Socket.IO, port `PORT`, default 5000) |
 | `npm run build` / `npm start` | `tsc` to `dist/` / `node dist/server.js` |
-| `npm run worker` | scan worker (`src/workers/scan.worker.ts`) |
-| `npm run repair-worker` | repair worker (`src/workers/repair.worker.ts`; needs git and a Docker daemon) |
+| `npm run worker` | scan worker (`src/workers/scan.worker.ts`); host-side, needs Redis reachable at `REDIS_HOST`:`REDIS_PORT`. Under Compose the `scan-worker` service runs the compiled equivalent |
+| `npm run repair-worker` | repair worker (`src/workers/repair.worker.ts`; needs git and a Docker daemon on the host). Under Compose the `repair-worker` service has no Docker access |
 | `npm run prisma:generate`, `prisma:migrate`, `prisma:deploy` | Prisma client / dev migration / deploy migrations |
 | `npm run test:*` | standalone `tsx` scripts, not a test framework |
 | `npm run benchmark:evaluate -- <ground-truth.json> <run-results.json>` | compute benchmark metrics from two JSON files |
@@ -35,9 +35,19 @@ npm run worker              # separate terminal
 npm run repair-worker       # separate terminal (needs git and a Docker daemon)
 ```
 
-Commands are bash (Git Bash/WSL on Windows). In PowerShell use `Copy-Item .env.example .env` and run each command on its own line. These steps were not run end to end in the last audit because Prisma's engine download was blocked; the migration SQL was applied to PostgreSQL 16 with `psql` instead.
+Commands above are bash (Git Bash/WSL on Windows). In Windows PowerShell use `Copy-Item .env.example .env`, and run `npm run dev`, `npm run worker` and `npm run repair-worker` each in its own PowerShell window, every one started in `server/` (the `.env` file is read from the current directory):
 
-PostgreSQL 16 and Redis 7 must be running and match `.env`. Under Docker Compose (see the [root README](../README.md#quick-start-docker-compose)) these steps are done by the `migrate`, `server`, `scan-worker` and `repair-worker` services, and `PORT` is `4000`. Environment variable reference: [Operations §2.2](../docs/OPERATIONS_SECURITY.md#22-server-environment-variables). Notes: Redis uses `REDIS_HOST`/`REDIS_PORT`/`REDIS_USERNAME`/`REDIS_PASSWORD` (not a URL); `JWT_EXPIRES_IN` (e.g. `12h`, `1d`) sets token lifetime and falls back to `1d` when invalid.
+```powershell
+cd server
+Copy-Item .env.example .env   # fill in real values
+npm install
+npx prisma migrate deploy
+npm run dev                   # window 1, http://localhost:5000/api/health
+npm run worker                # window 2
+npm run repair-worker         # window 3 (git on PATH, Docker Desktop running)
+```
+
+PostgreSQL 16 and Redis 7 must be running and match `.env`. Under Docker Compose (see the [root README](../README.md#quick-start-docker-compose)) these steps are done by the `migrate`, `server`, `scan-worker` and `repair-worker` services, and `PORT` is `4000` inside the Compose network (only the client is published, on host port 8080; the API is reached at `http://localhost:8080/api`). The Compose workers are containers, so `npm run worker` / `npm run repair-worker` are not used there. Environment variable reference: [Operations §2.2](../docs/OPERATIONS_SECURITY.md#22-server-environment-variables). Notes: Redis uses `REDIS_HOST`/`REDIS_PORT`/`REDIS_USERNAME`/`REDIS_PASSWORD` (not a URL); `JWT_EXPIRES_IN` (e.g. `12h`, `1d`) sets token lifetime and falls back to `1d` when invalid.
 
 ## API
 

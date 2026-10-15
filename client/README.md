@@ -20,7 +20,7 @@ There are no unit tests for the client. Registration and login are covered by Pl
 
 ## Building and deploying
 
-`npm ci && npm run lint && npm run build` writes the static site to `client/dist` (all three passed in the 14 October 2026 audit). When a host builds from the GitHub repository, set its root directory to `client`, build command `npm run build`, output directory `dist`, Node 22, the `VITE_API_URL` variable, and an SPA rewrite to `/index.html`. The API must be hosted separately and allow the frontend origin through `FRONTEND_URL`. Full steps and the symptom table: [root README, Deploying the frontend](../README.md#deploying-the-frontend-and-connecting-the-github-repository).
+`npm ci && npm run lint && npm run build` writes the static site to `client/dist`. When a host builds from the GitHub repository, set its root directory to `client`, build command `npm run build`, output directory `dist`, Node 22, the `VITE_API_URL` variable, and an SPA rewrite to `/index.html`. The API must be hosted separately and allow the frontend origin through `FRONTEND_URL`. Full steps and the symptom table: [root README, Deploying the frontend](../README.md#deploying-the-frontend-and-connecting-the-github-repository).
 
 ## What the UI does
 

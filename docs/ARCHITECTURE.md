@@ -4,9 +4,7 @@
 
 ## 1. System goals
 
-RepoDoctor is a student portfolio project that attempts to detect selected classes of defects in JavaScript and TypeScript repositories, propose fixes, apply them in an isolated workspace, run tests in Docker, verify the evidence, retry a bounded number of times and open a GitHub pull request only when verification succeeds. It never merges. Passing tests is evidence, not proof of correctness.
-
-The defensible product claim is: *RepoDoctor attempts to detect selected classes of defects in JavaScript/TypeScript repositories, proposes and applies fixes in an isolated environment, verifies them through automated tests, and creates a pull request when validation succeeds.* An end-to-end run supporting that sentence has **not** yet been recorded.
+The defensible product claim is: *RepoDoctor attempts to detect selected classes of defects in JavaScript/TypeScript repositories, proposes and applies fixes in an isolated environment, verifies them through automated tests, and creates a pull request when validation succeeds.* It never merges. Passing tests is evidence, not proof of correctness.
 
 ## 2. Actual technology stack
 
@@ -14,7 +12,7 @@ The defensible product claim is: *RepoDoctor attempts to detect selected classes
 |---|---|---|
 | Web client | React 19, TypeScript, Vite, axios, `socket.io-client` | `client/package.json` |
 | API | Node 22, Express 5, TypeScript, ESM/NodeNext | `server/package.json`, `server/tsconfig.json` |
-| Database | **PostgreSQL via Prisma 6** (not MongoDB); 16 migrations | `server/prisma/` |
+| Database | **PostgreSQL via Prisma 6**; 16 migrations | `server/prisma/` |
 | Queue | Redis + BullMQ 5; two queues, two worker processes | `server/src/queue/`, `server/src/workers/` |
 | Real-time | Socket.IO 4 with JWT handshake; per-user rooms | `server/src/realtime/socket.ts` |
 | AI | `AIProviderManager`: OpenRouter → Groq → Gemini | `server/src/ai/` |

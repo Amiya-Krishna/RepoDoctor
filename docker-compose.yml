@@ -9,7 +9,10 @@
 # Required in the shell or a root .env file (see .env.example):
 #   DATABASE_URL (or POSTGRES_PASSWORD with the bundled-db profile)
 #   REDIS_PASSWORD  password for the bundled Redis
-# and a filled-in server/.env (copy server/.env.example).
+# and a filled-in server/.env (copy server/.env.example). For this stack set
+#   FRONTEND_URL=http://localhost:8080
+#   GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback
+# (the API listens on 4000 inside the network; only the client's 8080 is published).
 #
 # Not included: the repair worker runs repository tests in Docker, which needs
 # access to a Docker daemon. This file deliberately does NOT mount the host
