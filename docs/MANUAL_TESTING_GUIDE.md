@@ -20,17 +20,17 @@
 | `DATABASE_URL` | everything | `postgresql://<user>:<password>@<endpoint>.<region>.aws.neon.tech/<database>?sslmode=require` |
 | `JWT_SECRET` | API start | the API refuses to start without it; use a long random value (the template contains only a placeholder) |
 | `JWT_EXPIRES_IN` | optional | digits + `s`/`m`/`h`/`d` (for example `12h`); anything else falls back to `1d` |
-| `PORT` | API | default `5000` for `npm run dev` (Compose sets `4000` inside its network; only host port `8080` is published) |
-| `FRONTEND_URL` | CORS, Socket.IO, OAuth redirect | default `http://localhost:5173` |
+| `PORT` | API | default `4000` for `npm run dev` and Compose; the browser address is `8080` in both modes |
+| `FRONTEND_URL` | CORS, Socket.IO, OAuth redirect | default `http://localhost:8080` (Docker and local) |
 | `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD` | queues | defaults `127.0.0.1`, `6379`, none (not a URL) |
-| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL` | GitHub OAuth | callback in the template: `http://localhost:5000/api/github/callback` (for Docker Compose use `http://localhost:8080/api/github/callback` and `FRONTEND_URL=http://localhost:8080`) |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL` | GitHub OAuth | callback in the template: `http://localhost:8080/api/github/callback` with `FRONTEND_URL=http://localhost:8080` (same for Docker Compose and local development) |
 | `OPENROUTER_API_KEY` / `GROQ_API_KEY` / `GEMINI_API_KEY` | analysis and repair | **at least one** real key; empty or `...` keys are ignored. `*_MODEL` may stay empty |
 | `GITHUB_TOKEN_ENCRYPTION_KEY` | optional | base64 of 32 random bytes; when set, new GitHub tokens are stored encrypted |
 | `GITHUB_WEBHOOK_SECRET` | webhook | without it `/api/github/webhook` answers `503` |
 | `SCAN_WORKER_CONCURRENCY`, `REPAIR_WORKER_CONCURRENCY` | optional | defaults 2 and 1 |
 | `TRUST_PROXY` | optional | number of reverse proxies in front of the API (Compose sets `1`) |
 
-Client (`client/.env`, optional): `VITE_API_URL` (default `http://localhost:5000/api`; the Docker image uses `/api`).
+Client (`client/.env`, optional): `VITE_API_URL` (default `/api`, same origin in both modes).
 
 You must supply yourself: a GitHub OAuth App (client id/secret), an AI provider key, and a GitHub account with a small JavaScript/TypeScript repository (use a **disposable** one for repair tests).
 
@@ -88,10 +88,10 @@ Use four terminals from the project root (on Windows PowerShell: four windows; i
 
 | Terminal | Command | Expected output | URL / port |
 |---|---|---|---|
-| 1 – API + Socket.IO | `cd server && npm run dev` | `PostgreSQL connected successfully`, then `RepoDoctor API and realtime server listening on port 5000` | `http://localhost:5000/api/health` |
+| 1 – API + Socket.IO | `cd server && npm run dev` | `PostgreSQL connected successfully`, then `RepoDoctor API and realtime server listening on port 4000` | `http://localhost:4000/api/health` |
 | 2 – Scan worker | `cd server && npm run worker` | `RepoDoctor scan worker started` | – |
 | 3 – Repair worker (needs git and a Docker daemon) | `cd server && npm run repair-worker` | `RepoDoctor autonomous repair worker started` | – |
-| 4 – Client | `cd client && npm run dev` | Vite prints `Local: http://localhost:5173/` | `http://localhost:5173` |
+| 4 – Client | `cd client && npm run dev` | Vite prints `Local: http://localhost:8080/` | `http://localhost:8080` (also `http://localhost:8080/api/health` via the proxy) |
 
 Production-style run:
 
@@ -160,7 +160,7 @@ Benchmark CLI: `npm run benchmark:evaluate` evaluates a results file against `se
 Setup once (bash):
 
 ```bash
-BASE=http://localhost:5000/api
+BASE=http://localhost:8080/api      # works for Docker and for local (Vite proxy)
 EMAIL="tester+$(date +%s)@example.com"
 PASS='CorrectHorse123'
 ```
@@ -209,12 +209,12 @@ Expected status **400** unless stated.
 - **PASS if** all three statuses match.
 
 ### TC-07 — CORS
-- **Action:** `curl -i -X OPTIONS $BASE/auth/login -H 'Origin: http://localhost:5173' -H 'Access-Control-Request-Method: POST'`
-- **Expected:** `204` with `Access-Control-Allow-Origin: http://localhost:5173` and `Access-Control-Allow-Credentials: true`.
+- **Action:** `curl -i -X OPTIONS $BASE/auth/login -H 'Origin: http://localhost:8080' -H 'Access-Control-Request-Method: POST'`
+- **Expected:** `204` with `Access-Control-Allow-Origin: http://localhost:8080` and `Access-Control-Allow-Credentials: true`.
 - **PASS if** the allow-origin header equals `FRONTEND_URL`.
 
 ### TC-08 — Connect GitHub (OAuth)
-- **Preconditions:** OAuth App with callback `http://localhost:5000/api/github/callback`; logged in.
+- **Preconditions:** OAuth App with callback `http://localhost:8080/api/github/callback`; logged in.
 - **Action:** in the client, log in and use **Connect GitHub**; or `curl -i $BASE/github/connect -H "Authorization: Bearer $TOKEN"` (returns `{"authUrl": ...}` and a short-lived `github_oauth_state` cookie) and open `authUrl` in a browser that holds that cookie.
 - **Expected:** the browser returns to `FRONTEND_URL`; `GET $BASE/auth/me` shows `githubUsername`. A tampered or expired `state` → `400`.
 - **Database check:** `psql "$PSQL_URL" -c 'select "githubUsername", length("githubAccessToken"), ("githubAccessToken" like '"'"'%.%.%'"'"') as encrypted from users;'` — with `GITHUB_TOKEN_ENCRYPTION_KEY` set `encrypted` is `t`; without it the token is stored as plain text (the server logs a one-time warning). **Never print the token itself.**
@@ -279,7 +279,7 @@ curl -i -X POST $BASE/github/webhook -H 'Content-Type: application/json' \
 - **PASS if** progress updates arrive for your jobs and not another user's, and a connection with an invalid token is refused.
 
 ### TC-18 — Client UI smoke test 
-1. Open `http://localhost:5173`; register a new account → `Account created successfully`; reload, log in → `Login successful`.
+1. Open `http://localhost:8080`; register a new account → `Account created successfully`; reload, log in → `Login successful`.
 2. Click **Connect GitHub**, authorize, return; the repository list loads.
 3. Click **Refresh repositories** → the list reloads.
 4. Click **Analyze Repository** (the label becomes `Scan queued/running…` while it runs) → progress updates; **View analysis** shows findings and generated tests; **Close analysis** closes the panel; **Remove repository** deletes it.

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
-import { api, getErrorMessage } from "../lib/api";
+import { api, getErrorMessage, socketBaseUrl } from "../lib/api";
 import { authHeaders } from "../lib/auth";
 import {
   getLatestAnalysis,
@@ -69,7 +69,7 @@ function RepositoryAnalysis({
     if (!token) return;
 
     const socket = io(
-      (import.meta.env.VITE_API_URL ?? "http://localhost:5000/api").replace(/\/api\/?$/, ""),
+      socketBaseUrl(),
       { auth: { token }, transports: ["websocket", "polling"] },
     );
 

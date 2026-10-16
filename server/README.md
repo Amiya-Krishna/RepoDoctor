@@ -16,7 +16,7 @@ Express 5 + TypeScript (ESM/NodeNext) backend for [RepoDoctor AI](../README.md):
 
 | Script | What it does |
 |---|---|
-| `npm run dev` | `tsx watch src/server.ts` (API + Socket.IO, port `PORT`, default 5000) |
+| `npm run dev` | `tsx watch src/server.ts` (API + Socket.IO, port `PORT`, default 4000) |
 | `npm run build` / `npm start` | `tsc` to `dist/` / `node dist/server.js` |
 | `npm run worker` | scan worker (`src/workers/scan.worker.ts`); host-side, needs Redis reachable at `REDIS_HOST`:`REDIS_PORT`. Under Compose the `scan-worker` service runs the compiled equivalent |
 | `npm run repair-worker` | repair worker (`src/workers/repair.worker.ts`; needs git and a Docker daemon on the host). Under Compose the `repair-worker` service has no Docker access |
@@ -30,7 +30,7 @@ Express 5 + TypeScript (ESM/NodeNext) backend for [RepoDoctor AI](../README.md):
 cp .env.example .env        # fill in real values; never commit .env
 npm install                 # postinstall runs prisma generate (needs access to binaries.prisma.sh)
 npx prisma migrate deploy   # 16 migrations; never `migrate reset` on data you need
-npm run dev                 # http://localhost:5000/api/health
+npm run dev                 # API on http://localhost:4000/api/health; the app itself is http://localhost:8080 (start the client too)
 npm run worker              # separate terminal
 npm run repair-worker       # separate terminal (needs git and a Docker daemon)
 ```
@@ -42,12 +42,12 @@ cd server
 Copy-Item .env.example .env   # fill in real values
 npm install
 npx prisma migrate deploy
-npm run dev                   # window 1, http://localhost:5000/api/health
+npm run dev                   # window 1, API: http://localhost:4000/api/health
 npm run worker                # window 2
 npm run repair-worker         # window 3 (git on PATH, Docker Desktop running)
 ```
 
-PostgreSQL 16 and Redis 7 must be running and match `.env`. Under Docker Compose (see the [root README](../README.md#quick-start-docker-compose)) these steps are done by the `migrate`, `server`, `scan-worker` and `repair-worker` services, and `PORT` is `4000` inside the Compose network (only the client is published, on host port 8080; the API is reached at `http://localhost:8080/api`). The Compose workers are containers, so `npm run worker` / `npm run repair-worker` are not used there. Environment variable reference: [Operations §2.2](../docs/OPERATIONS_SECURITY.md#22-server-environment-variables). Notes: Redis uses `REDIS_HOST`/`REDIS_PORT`/`REDIS_USERNAME`/`REDIS_PASSWORD` (not a URL); `JWT_EXPIRES_IN` (e.g. `12h`, `1d`) sets token lifetime and falls back to `1d` when invalid.
+`PORT` is `4000` locally and under Compose; the browser always uses `http://localhost:8080` (Vite dev server locally, nginx in Docker). Step by step for both modes: [root README, Run on port 8080](../README.md#run-on-port-8080-docker-or-powershell). PostgreSQL 16 and Redis 7 must be running and match `.env`. Under Docker Compose (see the [root README](../README.md#quick-start-docker-compose)) these steps are done by the `migrate`, `server`, `scan-worker` and `repair-worker` services, and `PORT` is `4000` inside the Compose network (only the client is published, on host port 8080; the API is reached at `http://localhost:8080/api`). The Compose workers are containers, so `npm run worker` / `npm run repair-worker` are not used there. Environment variable reference: [Operations §2.2](../docs/OPERATIONS_SECURITY.md#22-server-environment-variables). Notes: Redis uses `REDIS_HOST`/`REDIS_PORT`/`REDIS_USERNAME`/`REDIS_PASSWORD` (not a URL); `JWT_EXPIRES_IN` (e.g. `12h`, `1d`) sets token lifetime and falls back to `1d` when invalid.
 
 ## API
 

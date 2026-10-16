@@ -19,7 +19,7 @@ Names are taken from the code and `server/.env.example`. Copy `server/.env.examp
 | Variable | In `.env.example` | Read by | Notes |
 |---|:-:|---|---|
 | `DATABASE_URL` | yes | Prisma datasource | PostgreSQL URL |
-| `PORT` | yes (5000) | `server.ts` | default 5000 (Compose and `client/nginx.conf` use 4000 inside the container network; only 8080 is published) |
+| `PORT` | yes (4000) | `server.ts` | default 4000 locally and in Compose (`client/nginx.conf` and the Vite dev proxy both forward to it); the browser address is always `http://localhost:8080` |
 | `JWT_SECRET` | yes | auth, OAuth state, sockets | server refuses to start without it |
 | `JWT_EXPIRES_IN` | no (default `1d`) | `services/auth.service.ts` | digits + `s`/`m`/`h`/`d`; invalid values fall back to `1d` |
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL` | yes | `services/github.service.ts` | OAuth |
@@ -31,10 +31,10 @@ Names are taken from the code and `server/.env.example`. Copy `server/.env.examp
 | `SCAN_WORKER_CONCURRENCY` | yes (2) | scan worker | |
 | `REPAIR_WORKER_CONCURRENCY` | no (default 1) | repair worker | |
 | `GITHUB_WEBHOOK_SECRET` | yes | webhook controller | missing → webhook returns 503 |
-| `FRONTEND_URL` | yes | CORS, Socket.IO, OAuth redirect | default `http://localhost:5173`; must equal the browser origin exactly (no trailing slash). Compose: `http://localhost:8080`. In production only this origin is allowed |
+| `FRONTEND_URL` | yes | CORS, Socket.IO, OAuth redirect | default `http://localhost:8080` (Docker and local development); must equal the browser origin exactly (no trailing slash). In production only this origin is allowed |
 | `NODE_ENV` | no | cookie `secure` flag | |
 
-Client: `VITE_API_URL` (`client/.env.example`; default `http://localhost:5000/api`; the client Docker build uses `/api`).
+Client: `VITE_API_URL` (`client/.env.example`; default `/api`, same origin: proxied by the Vite dev server locally and by nginx in Docker).
 
 Compose-level (shell or root `.env`): `REDIS_PASSWORD` is always required (Compose fails with `required variable REDIS_PASSWORD is missing a value`); `DATABASE_URL` for an external database, or `POSTGRES_PASSWORD` with `--profile bundled-db`. `server/.env` must exist.
 
@@ -45,14 +45,14 @@ Compose-level (shell or root `.env`): `REDIS_PASSWORD` is always required (Compo
 cd server
 npm install                 # postinstall runs `prisma generate`
 npx prisma migrate deploy   # or: npm run prisma:deploy
-npm run dev                 # API + Socket.IO (tsx watch src/server.ts), http://localhost:5000/api/health
+npm run dev                 # API + Socket.IO (tsx watch src/server.ts), http://localhost:4000/api/health (API directly; http://localhost:8080/api/health once the client runs)
 ```
 
 ```bash
 # each in its own terminal, from the repository root
 (cd server && npm run worker)          # scan worker
 (cd server && npm run repair-worker)   # repair worker (needs git, Docker daemon, GitHub token in DB)
-(cd client && npm install && npm run dev)   # http://localhost:5173
+(cd client && npm install && npm run dev)   # http://localhost:8080 (proxies /api and /socket.io to the API on 4000; stop the Compose stack first, both use 8080)
 ```
 
 In PowerShell, run the `cd` and `npm` commands on separate lines (Windows PowerShell 5.1 has no `&&`) and give each long-running process its own window. The `npm run dev`, `npm run worker` and `npm run repair-worker` scripts must run from `server/` (that is where `.env` is read) and need PostgreSQL and Redis reachable at the addresses in `server/.env`; the Compose Redis has no published port, so these host-side scripts cannot use it.
@@ -129,7 +129,7 @@ The user's own working copy is never involved; the "source" is always a fresh cl
 | `repair-worker` | `server/Dockerfile` | Processes autonomous repairs (see limitation below). |
 | `client` | `client/Dockerfile` (nginx) | Serves the SPA and proxies `/api/` and `/socket.io/` to `server:4000`. |
 
-Required variables (root `.env`, template `.env.example`): `REDIS_PASSWORD`, and either `DATABASE_URL` or, with `--profile bundled-db`, `POSTGRES_PASSWORD` (URL-safe characters only because it is embedded in the database URL). `server/.env` (template `server/.env.example`) is also required; set `FRONTEND_URL=http://localhost:8080` and `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback` there for a local Compose run (the template's `5173` / `5000` values point at ports Compose does not publish), and register the same callback URL in the GitHub OAuth app. Open the app as `http://localhost:8080`: the OAuth state cookie is `Secure` under `NODE_ENV=production`, which browsers accept over HTTP only for `localhost`.
+Required variables (root `.env`, template `.env.example`): `REDIS_PASSWORD`, and either `DATABASE_URL` or, with `--profile bundled-db`, `POSTGRES_PASSWORD` (URL-safe characters only because it is embedded in the database URL). `server/.env` (template `server/.env.example`) is also required; set `FRONTEND_URL=http://localhost:8080` and `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback` there (these are already the template values and are the same for local development), and register the same callback URL in the GitHub OAuth app. Open the app as `http://localhost:8080`: the OAuth state cookie is `Secure` under `NODE_ENV=production`, which browsers accept over HTTP only for `localhost`.
 
 Commands (add `--profile bundled-db` to each when using the bundled PostgreSQL):
 

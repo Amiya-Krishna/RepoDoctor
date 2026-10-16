@@ -2,8 +2,18 @@ import axios from "axios";
 
 export const AUTH_EXPIRED_EVENT = "repodoctor:auth-expired";
 
+// Default "/api" is same-origin: nginx (Docker) and the Vite dev server (local)
+// both serve the app on http://localhost:8080 and proxy /api and /socket.io.
+export const API_URL: string = import.meta.env.VITE_API_URL ?? "/api";
+
+/** Socket.IO origin: the API URL without its /api suffix ("" = same origin). */
+export const socketBaseUrl = (): string => {
+  const base = API_URL.replace(/\/api\/?$/, "");
+  return base || window.location.origin;
+};
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:5000/api",
+  baseURL: API_URL,
   withCredentials: true,
 });
 

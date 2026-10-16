@@ -6,17 +6,17 @@ React 19 + TypeScript + Vite single-page app for [RepoDoctor AI](../README.md).
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Vite dev server (default `http://localhost:5173`) |
+| `npm run dev` | Vite dev server on `http://localhost:8080` (same address as Docker); proxies `/api` and `/socket.io` to the API on `http://127.0.0.1:4000` (override with `API_PROXY_TARGET`) |
 | `npm run build` | `tsc -b && vite build` |
 | `npm run lint` | `eslint .` |
-| `npm run preview` | serve the production build |
+| `npm run preview` | serve the production build on `http://localhost:8080` with the same proxy (stop the Docker stack first) |
 | `npm run test:e2e` | Playwright browser tests for registration/login (see below) |
 
-There are no unit tests for the client. Registration and login are covered by Playwright browser tests in `e2e/auth.spec.ts`: `npm run test:e2e` against a running API and client (first time: `npx playwright install chromium`; set `E2E_BASE_URL` if the client is not on `http://localhost:5173`, and `PLAYWRIGHT_CHROMIUM_PATH` to use an existing Chromium). Each run registers a unique `rd_e2e_<timestamp>@example.test` user and never touches existing accounts. Point the API at a Neon branch, not your main database.
+There are no unit tests for the client. Registration and login are covered by Playwright browser tests in `e2e/auth.spec.ts`: `npm run test:e2e` against a running API and client (first time: `npx playwright install chromium`; set `E2E_BASE_URL` if the client is not on `http://localhost:8080`, and `PLAYWRIGHT_CHROMIUM_PATH` to use an existing Chromium). Each run registers a unique `rd_e2e_<timestamp>@example.test` user and never touches existing accounts. Point the API at a Neon branch, not your main database.
 
 ## Configuration
 
-`VITE_API_URL` is the API base URL, default `http://localhost:5000/api`. Vite reads it at **build time** and embeds it in the bundle (checked: building with `VITE_API_URL=https://api.example.test/api` embeds that URL; building without it embeds `http://localhost:5000/api`), so a hosted build must set it before building and be redeployed when it changes. It must end in `/api` because the Socket.IO origin is derived by removing that suffix. The Docker build (`client/Dockerfile`) sets it to `/api` and serves the build with nginx, which proxies `/api/` and `/socket.io/` to `http://server:4000`. The Socket.IO connection uses the same origin with `/api` removed.
+`VITE_API_URL` is the API base URL, default `/api` (same origin). Locally the Vite dev server proxies `/api` and `/socket.io` to the API (port 4000), exactly like nginx does in Docker, so nothing needs to be set for local development or Docker. Vite reads it at **build time** and embeds it in the bundle (checked: building with `VITE_API_URL=https://api.example.test/api` embeds that URL; building without it embeds `/api`), so a hosted build must set it before building and be redeployed when it changes. It must end in `/api` because the Socket.IO origin is derived by removing that suffix. The Docker build (`client/Dockerfile`) sets it to `/api` and serves the build with nginx, which proxies `/api/` and `/socket.io/` to `http://server:4000`. The Socket.IO connection uses the same origin with `/api` removed (when nothing remains, `window.location.origin`).
 
 ## Building and deploying
 

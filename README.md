@@ -8,7 +8,119 @@ The project is Docker-based: the supported way to run the whole stack is `docker
 
 ## Contents
 
-[Quick start](#quick-start-docker-compose) · [Connecting GitHub](#connecting-github-oauth) · [Deploying the frontend](#deploying-the-frontend-and-connecting-the-github-repository) · [Accounts](#registration-and-login) · [Status](#implementation-status) · [Architecture](#architecture) · [Stack](#technology-stack) · [Local development](#local-development-without-compose) · [Tests](#testing) · [Security](#security-boundaries) · [Troubleshooting](#troubleshooting) · [Limitations](#known-limitations) · [Docs](#documentation)
+[Run on port 8080](#run-on-port-8080-docker-or-powershell) · [Quick start](#quick-start-docker-compose) · [Connecting GitHub](#connecting-github-oauth) · [Deploying the frontend](#deploying-the-frontend-and-connecting-the-github-repository) · [Accounts](#registration-and-login) · [Status](#implementation-status) · [Architecture](#architecture) · [Stack](#technology-stack) · [Local development](#local-development-without-compose) · [Tests](#testing) · [Security](#security-boundaries) · [Troubleshooting](#troubleshooting) · [Limitations](#known-limitations) · [Docs](#documentation)
+
+## Run on port 8080 (Docker **or** PowerShell)
+
+RepoDoctor has **one address in every mode: http://localhost:8080**. The browser, the GitHub OAuth callback and `server/.env` are identical whether you run the stack with Docker or directly from PowerShell.
+
+| | Docker Compose | Local (PowerShell, `npm`) |
+|---|---|---|
+| App in the browser | http://localhost:8080 (nginx) | http://localhost:8080 (Vite dev server) |
+| API health | http://localhost:8080/api/health | http://localhost:8080/api/health (proxied) or http://localhost:4000/api/health (direct) |
+| Socket.IO | `/socket.io/` on 8080 (nginx proxy) | `/socket.io/` on 8080 (Vite proxy) |
+| API port | 4000 (inside the Compose network only) | 4000 (`PORT` in `server/.env`) |
+| Redis / PostgreSQL | bundled Redis (+ optional Postgres), no host ports | Redis `127.0.0.1:6379`, your own PostgreSQL / Neon |
+| GitHub OAuth callback | `http://localhost:8080/api/github/callback` | **the same** `http://localhost:8080/api/github/callback` |
+
+**Only one of the two can run at a time**, because both want host port 8080. Stop one before starting the other (`docker compose down`, or `Ctrl+C` in the Vite window). The Vite dev server uses `strictPort`: if 8080 is taken it stops with `Port 8080 is already in use` instead of silently picking another port.
+
+Run every command from the folder that contains `docker-compose.yml`. Windows PowerShell 5.1 has no `&&`, so each command goes on its own line.
+
+### One-time setup (both modes)
+
+```powershell
+Copy-Item .env.example .env
+Copy-Item server\.env.example server\.env
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"   # value for JWT_SECRET
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"      # value for REDIS_PASSWORD and GITHUB_TOKEN_ENCRYPTION_KEY
+```
+
+Edit `server\.env` (this one file works for Docker **and** local; the template already has the 8080 values):
+
+- `JWT_SECRET`, at least one AI key (`OPENROUTER_API_KEY` / `GROQ_API_KEY` / `GEMINI_API_KEY`), and for GitHub `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`
+- keep `PORT=4000`, `FRONTEND_URL=http://localhost:8080`, `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback`
+- `DATABASE_URL` (used by local runs), `REDIS_HOST=127.0.0.1`, `REDIS_PORT=6379`, empty `REDIS_PASSWORD` (used by local runs; Docker Compose overrides `DATABASE_URL`, `REDIS_*`, `PORT` and `NODE_ENV` for the containers)
+
+Edit the root `.env` (**Docker only**): `REDIS_PASSWORD` (any long random string) and `DATABASE_URL`, or `POSTGRES_PASSWORD` for the bundled database (then add `--profile bundled-db` to every `docker compose` command below).
+
+In your GitHub OAuth app set *Homepage URL* `http://localhost:8080` and *Authorization callback URL* `http://localhost:8080/api/github/callback`. One OAuth app now serves both modes.
+
+### Option A: Docker (PowerShell)
+
+Docker Desktop must be running.
+
+```powershell
+docker compose config -q
+docker compose up --build -d
+docker compose ps
+Invoke-RestMethod http://localhost:8080/api/health
+```
+
+`docker compose ps` should show `server` as `healthy` and `migrate` as exited (0). Open **http://localhost:8080**.
+
+```powershell
+docker compose logs -f server                     # logs (also: scan-worker, repair-worker, migrate, client)
+docker compose up -d --force-recreate server scan-worker repair-worker   # after editing server\.env
+docker compose down                               # stop (keeps volumes); `down -v` also deletes them
+```
+
+### Option B: local development in PowerShell (no Docker for the app)
+
+Prerequisites: Node.js 22, Git, a PostgreSQL 16 database (Neon or local), Redis on `127.0.0.1:6379`. Docker is only needed to host Redis and for the repair worker's test runs.
+
+**Window 0, once** (stop the Docker stack first if it is running: `docker compose down`):
+
+```powershell
+docker run -d --name repodoctor-redis -p 6379:6379 redis:7-alpine
+cd server
+npm install
+npx prisma migrate deploy
+cd ..\client
+npm install
+```
+
+Next time, start Redis again with `docker start repodoctor-redis`. If you also want a local PostgreSQL: `docker run -d --name repodoctor-pg -e POSTGRES_USER=repodoctor -e POSTGRES_PASSWORD=<dev-password> -e POSTGRES_DB=repodoctor -p 5432:5432 postgres:16` and `DATABASE_URL=postgresql://repodoctor:<dev-password>@localhost:5432/repodoctor?schema=public`.
+
+**Then four windows, each opened in the folder that contains `docker-compose.yml`:**
+
+```powershell
+# Window 1: API + Socket.IO on port 4000
+cd server
+npm run dev
+```
+
+```powershell
+# Window 2: scan worker
+cd server
+npm run worker
+```
+
+```powershell
+# Window 3: repair worker (needs git on PATH and Docker Desktop running)
+cd server
+npm run repair-worker
+```
+
+```powershell
+# Window 4: web client on port 8080 (proxies /api and /socket.io to the API on 4000)
+cd client
+npm run dev
+```
+
+Check: `Invoke-RestMethod http://localhost:8080/api/health` (through the Vite proxy) and `Invoke-RestMethod http://localhost:4000/api/health` (API directly) both return `status: ok`. Open **http://localhost:8080**. Stop with `Ctrl+C` in each window.
+
+If the API runs on a different host or port, start the client with `$env:API_PROXY_TARGET = "http://127.0.0.1:<port>"` set first.
+
+### Port 8080 is busy
+
+```powershell
+Get-NetTCPConnection -LocalPort 8080 -State Listen | Select-Object LocalPort, OwningProcess
+Get-Process -Id <OwningProcess>
+docker ps --filter "publish=8080"
+```
+
+If it is the other RepoDoctor mode: `docker compose down` (Docker) or `Ctrl+C` in the Vite window (local).
 
 ## Quick start (Docker Compose)
 
@@ -44,12 +156,12 @@ Root `.env`:
   - **External (default, e.g. Neon):** set `DATABASE_URL` (direct, non-pooled endpoint, `sslmode=require`, `connect_timeout=30`).
   - **Bundled PostgreSQL:** comment out `DATABASE_URL`, set `POSTGRES_PASSWORD` (letters, digits, `-`, `_` only) and add `--profile bundled-db` to every `docker compose` command below.
 
-`server/.env` (values for the containers; Compose itself overrides `DATABASE_URL`, `REDIS_*`, `PORT` (4000 inside the container network), `NODE_ENV` and `TRUST_PROXY`; the template's `PORT=5000` applies only to running the API outside Compose):
+`server/.env` (values for the containers; Compose itself overrides `DATABASE_URL`, `REDIS_*`, `PORT` (4000 inside the container network), `NODE_ENV` and `TRUST_PROXY`; the template's `PORT=4000` is the same value Compose uses, so one `server/.env` serves both Docker and local runs):
 
 - `JWT_SECRET`: required, long random string: `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`
 - At least one AI key (see prerequisites).
-- `FRONTEND_URL=http://localhost:8080`: **change this from the template's `http://localhost:5173`** (the Vite dev server, which does not run under Compose), otherwise the redirect after GitHub sign-in and Socket.IO CORS point at an origin nothing serves. Open the app as `http://localhost:8080` exactly.
-- `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback`, and the same URL as the *Authorization callback URL* of your GitHub OAuth app (**not** the template's `http://localhost:5000/...`: Compose publishes no port 5000). Also set `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`. Step by step: [Connecting GitHub](#connecting-github-oauth).
+- `FRONTEND_URL=http://localhost:8080`: already the template value (the same in Docker and local development). Open the app as `http://localhost:8080` exactly.
+- `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback`, and the same URL as the *Authorization callback URL* of your GitHub OAuth app (already the template value). Also set `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`. Step by step: [Connecting GitHub](#connecting-github-oauth).
 - Optional: `GITHUB_TOKEN_ENCRYPTION_KEY` (`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`) and `GITHUB_WEBHOOK_SECRET`.
 
 ### Start, use and stop
@@ -99,7 +211,7 @@ Registration and login can be tried straight away at http://localhost:8080 (see 
 
 Open the client, choose **Create an account**, enter a name, an email address and a password of 8–128 characters. Registration signs you in; later use **Log in**. Sessions are JWTs (lifetime `JWT_EXPIRES_IN`, default `1d`) kept in the browser; an expired or invalid token returns you to the login form.
 
-Check it from the command line against a running stack (replace the port with `5000` when running the API locally with `npm run dev`):
+Check it from the command line against a running stack (the same URLs work when running locally with `npm run dev`, because the Vite dev server also listens on 8080 and proxies `/api`; the API itself is on `http://localhost:4000`):
 
 ```bash
 curl -s -X POST http://localhost:8080/api/auth/register -H 'Content-Type: application/json' \
@@ -125,16 +237,16 @@ The **Connect GitHub** button works like this: the browser calls `GET /api/githu
 Local Compose setup:
 
 1. On GitHub: Settings → Developer settings → OAuth Apps → **New OAuth App**. *Homepage URL* `http://localhost:8080`, *Authorization callback URL* `http://localhost:8080/api/github/callback`. Generate a client secret.
-2. In `server/.env` set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback` and `FRONTEND_URL=http://localhost:8080`. The callback must match the one registered at GitHub in scheme, host, port and path. An OAuth app has one callback URL, so use a separate OAuth app (or edit it) when you switch between Compose (`8080`) and local development (`5000`).
+2. In `server/.env` set `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback` and `FRONTEND_URL=http://localhost:8080`. The callback must match the one registered at GitHub in scheme, host, port and path. Docker and local development both use `8080`, so the same OAuth app works for both (never run both at once).
 3. Apply the change: `docker compose up -d --force-recreate server scan-worker repair-worker`.
-4. Open `http://localhost:8080` (not `127.0.0.1`, not a LAN address, not `:5173`), log in and choose **Connect GitHub**. After authorising you return to `http://localhost:8080` and the repository list loads.
+4. Open `http://localhost:8080` (not `127.0.0.1`, not a LAN address), log in and choose **Connect GitHub**. After authorising you return to `http://localhost:8080` and the repository list loads.
 
 The API container needs outbound HTTPS to `github.com` and `api.github.com`; `/api/github/repositories` returns the 100 most recently updated repositories the token can access. Organisation repositories appear only if the organisation has approved the OAuth app. If it fails, see the table below and `docker compose logs server`.
 
 | Symptom | Cause |
 |---|---|
-| Browser error `ERR_CONNECTION_REFUSED` on `localhost:5000` after authorising | `GITHUB_CALLBACK_URL` is still the template value; under Compose only port 8080 is published |
-| After authorising the browser lands on `localhost:5173` and fails | `FRONTEND_URL` is still the template value |
+| Browser error `ERR_CONNECTION_REFUSED` on `localhost:5000` / `5173` after authorising | `server/.env` still has the old values from an earlier template; set `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback` and `FRONTEND_URL=http://localhost:8080` |
+| `Port 8080 is already in use` (Vite) or `port is already allocated` (Docker) | the other mode is still running; stop it (see [Port 8080 is busy](#port-8080-is-busy)) |
 | GitHub shows a `redirect_uri` mismatch | the OAuth app's callback URL differs from `GITHUB_CALLBACK_URL` |
 | `Invalid GitHub OAuth state` | the app was opened on a different host than the callback (`127.0.0.1` vs `localhost`); the state cookie is `Secure` when `NODE_ENV=production` (Compose sets it) and browsers accept that over plain HTTP only for `localhost`; the 10-minute state expired; or `JWT_SECRET` changed in between |
 | `Failed to obtain GitHub access token` | wrong `GITHUB_CLIENT_SECRET` or `GITHUB_CLIENT_ID`, or the code was already used |
@@ -177,13 +289,13 @@ The API container needs outbound HTTPS to `github.com` and `api.github.com`; `/a
    - serve both under one registrable domain (for example `app.example.com` and `api.example.com`), or
    - make the frontend host proxy `/api/` and `/socket.io/` to the API (exactly what `client/nginx.conf` does) and build with `VITE_API_URL=/api`.
    Default `*.vercel.app` / `*.onrender.com` style hostnames are different sites from each other, so use a custom domain or the proxy approach.
-5. After deploying, check from your own machine: `curl -i https://<your-api-host>/api/health` returns `200`; opening the frontend shows no CORS or `localhost:5000` errors in the browser console; **Connect GitHub** completes and returns to the frontend.
+5. After deploying, check from your own machine: `curl -i https://<your-api-host>/api/health` returns `200`; opening the frontend shows no CORS or `localhost` errors in the browser console; **Connect GitHub** completes and returns to the frontend.
 
 ### Symptom → cause
 
 | Symptom on the deployed frontend | Cause |
 |---|---|
-| Requests go to `http://localhost:5000/api` | `VITE_API_URL` was not set during the host's build |
+| Requests go to `/api` on the frontend host and return 404 | `VITE_API_URL` was not set during the host's build (the default is the same-origin `/api`) |
 | Host build fails (`package.json` not found) or serves an empty site | root directory not set to `client` |
 | Refreshing a deep link gives 404 | no SPA rewrite to `index.html` |
 | CORS "Network Error" on login | `FRONTEND_URL` differs from the page origin (typo, `http` vs `https`, trailing slash, `www`) |
@@ -266,59 +378,34 @@ GitHub integration → repository ingestion → repository context → bug, secu
 
 ## Local development (without Compose)
 
-Prerequisites: Node.js 22, npm, Git, a PostgreSQL 16 database (Neon or local), Redis 7 (and Docker, only for the repair worker). The bash commands below also work in Git Bash/WSL; Windows PowerShell commands follow. `npm run dev`, `npm run worker`, `npm run repair-worker` and the client's `npm run dev` are long-running processes: each needs **its own terminal window**, and the three server commands must be run from `server/` because `dotenv` reads `server/.env` from the current directory.
+The step-by-step PowerShell commands are in [Run on port 8080](#option-b-local-development-in-powershell-no-docker-for-the-app). Summary: the web client (Vite dev server) listens on **8080** and proxies `/api` and `/socket.io` to the API on **4000**, so the browser address, the GitHub callback and `server/.env` are the same as under Docker Compose. Stop the Compose stack first (`docker compose down`): both use host port 8080.
 
-Local PostgreSQL and Redis can be started with Docker (development only; replace the password). This route does not use `docker compose`, so stop the Compose stack first if you want the same OAuth app and ports free:
+Prerequisites: Node.js 22, npm, Git, a PostgreSQL 16 database (Neon or local), Redis 7 (and Docker, only for the repair worker). `npm run dev`, `npm run worker`, `npm run repair-worker` and the client's `npm run dev` are long-running processes: each needs **its own terminal window**, and the three server commands must be run from `server/` because `dotenv` reads `server/.env` from the current directory.
+
+Local PostgreSQL and Redis can be started with Docker (development only; replace the password):
 
 ```bash
 docker run -d --name repodoctor-pg -e POSTGRES_USER=repodoctor -e POSTGRES_PASSWORD='<dev-password>' -e POSTGRES_DB=repodoctor -p 5432:5432 postgres:16
 docker run -d --name repodoctor-redis -p 6379:6379 redis:7-alpine
 ```
 
-Matching `server/.env` values: `DATABASE_URL=postgresql://repodoctor:<dev-password>@localhost:5432/repodoctor?schema=public`, `REDIS_HOST=127.0.0.1`, `REDIS_PORT=6379`, an empty `REDIS_PASSWORD`, `PORT=5000`, `FRONTEND_URL=http://localhost:5173` and `GITHUB_CALLBACK_URL=http://localhost:5000/api/github/callback` (register that callback in a GitHub OAuth app; see [Connecting GitHub](#connecting-github-oauth)).
+Matching `server/.env` values: `DATABASE_URL=postgresql://repodoctor:<dev-password>@localhost:5432/repodoctor?schema=public`, `REDIS_HOST=127.0.0.1`, `REDIS_PORT=6379`, an empty `REDIS_PASSWORD`, `PORT=4000`, `FRONTEND_URL=http://localhost:8080` and `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback` (register that callback in a GitHub OAuth app; see [Connecting GitHub](#connecting-github-oauth)).
 
 ```bash
 cd server
 cp .env.example .env                 # fill in values (DATABASE_URL, JWT_SECRET, an AI key, ...); never commit .env
 npm install                          # runs prisma generate (postinstall); needs access to binaries.prisma.sh
 npx prisma migrate deploy            # applies the 16 migrations; never `migrate reset` on data you need
-npm run dev                          # API + Socket.IO on PORT (default 5000): http://localhost:5000/api/health
+npm run dev                          # API + Socket.IO on PORT (default 4000): http://localhost:4000/api/health
 npm run worker                       # scan worker (separate terminal)
 npm run repair-worker                # repair worker (separate terminal; needs git and a Docker daemon)
 
 cd ../client
 npm install
-npm run dev                          # http://localhost:5173 (API default http://localhost:5000/api, override with VITE_API_URL)
+npm run dev                          # http://localhost:8080 (proxies /api and /socket.io to http://127.0.0.1:4000; override with API_PROXY_TARGET)
 ```
 
-Windows PowerShell, four windows, each starting in the folder that contains `docker-compose.yml`:
-
-```powershell
-# Window 0, once: dependencies, environment and database schema
-cd server
-Copy-Item .env.example .env          # then edit .env as described above
-npm install
-npx prisma migrate deploy
-
-# Window 1: API + Socket.IO, http://localhost:5000/api/health
-cd server
-npm run dev
-
-# Window 2: scan worker
-cd server
-npm run worker
-
-# Window 3: repair worker (needs git on PATH and Docker Desktop running; it runs `docker run` for the tests)
-cd server
-npm run repair-worker
-
-# Window 4: client, http://localhost:5173
-cd client
-npm install
-npm run dev
-```
-
-Configuration notes: `JWT_EXPIRES_IN` is digits plus `s`/`m`/`h`/`d` (invalid values fall back to `1d`); Redis uses `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD` (not a URL; defaults `127.0.0.1:6379`, no password); without `GITHUB_TOKEN_ENCRYPTION_KEY` GitHub tokens are stored as plain text and a warning is logged; set `TRUST_PROXY=1` behind a reverse proxy; at least one AI provider key is required (code that loads `src/ai/ai.config.ts` throws `No AI provider is configured` otherwise; reproduced with `tsx`). For local development keep `FRONTEND_URL=http://localhost:5173` and `GITHUB_CALLBACK_URL=http://localhost:5000/api/github/callback`. Full variable reference: [Operations §2](docs/OPERATIONS_SECURITY.md#2-configuration).
+Configuration notes: `JWT_EXPIRES_IN` is digits plus `s`/`m`/`h`/`d` (invalid values fall back to `1d`); Redis uses `REDIS_HOST`, `REDIS_PORT`, `REDIS_USERNAME`, `REDIS_PASSWORD` (not a URL; defaults `127.0.0.1:6379`, no password); without `GITHUB_TOKEN_ENCRYPTION_KEY` GitHub tokens are stored as plain text and a warning is logged; set `TRUST_PROXY=1` behind a reverse proxy; at least one AI provider key is required (code that loads `src/ai/ai.config.ts` throws `No AI provider is configured` otherwise; reproduced with `tsx`). Keep `FRONTEND_URL=http://localhost:8080` and `GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback` for both local and Docker runs. Full variable reference: [Operations §2](docs/OPERATIONS_SECURITY.md#2-configuration).
 
 ## Testing
 
@@ -340,7 +427,7 @@ npm run lint && npm run build
 # Compose file (root .env and server/.env must exist)
 docker compose config -q
 # Browser end-to-end for registration/login (needs a running API + client; first time: npx playwright install chromium)
-npm run test:e2e                     # E2E_BASE_URL overrides the client URL (default http://localhost:5173; Compose: http://localhost:8080)
+npm run test:e2e                     # E2E_BASE_URL overrides the client URL (default http://localhost:8080, the same for Compose and `npm run dev`)
 ```
 
 The full list of `test:*` scripts is in `server/package.json` (many call AI providers or GitHub and need real credentials). Step-by-step manual checks are in the [manual testing guide](docs/MANUAL_TESTING_GUIDE.md).

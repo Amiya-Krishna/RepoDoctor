@@ -6,7 +6,7 @@ import { initRealtime, closeRealtime } from "./realtime/socket.js";
 import { closeScanQueue } from "./queue/scan.queue.js";
 import { closeRepairQueue } from "./queue/repair.queue.js";
 
-const PORT = Number(process.env.PORT ?? 5000);
+const PORT = Number(process.env.PORT ?? 4000);
 
 const startServer = async () => {
   if (!process.env.JWT_SECRET) {

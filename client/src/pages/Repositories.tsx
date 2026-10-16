@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import axios from "axios";
-import { api, getErrorMessage } from "../lib/api";
+import { api, getErrorMessage, socketBaseUrl } from "../lib/api";
 import { authHeaders } from "../lib/auth";
 import {
   analyzeRepository,
@@ -26,10 +26,6 @@ const isGitHubNotConnected = (error: unknown) =>
   axios.isAxiosError(error) &&
   error.response?.status === 400 &&
   (error.response.data as { message?: unknown } | undefined)?.message === NOT_CONNECTED_MESSAGE;
-
-const socketBaseUrl = () =>
-  (import.meta.env.VITE_API_URL ?? "http://localhost:5000/api")
-    .replace(/\/api\/?$/, "");
 
 function Repositories() {
   const [repositories, setRepositories] = useState<Repository[]>([]);

@@ -17,7 +17,7 @@ export class OpenRouterProvider implements AIProvider {
       apiKey: aiConfig.openrouterKey,
       baseURL: "https://openrouter.ai/api/v1",
       defaultHeaders: {
-        "HTTP-Referer": "http://localhost:5000",
+        "HTTP-Referer": "http://localhost:8080",
         "X-Title": "RepoDoctor AI",
       },
     });

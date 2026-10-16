@@ -68,7 +68,7 @@ GitHub integration → Repository ingestion → Repository context → Analysis
 - **Planned work:** Git/GitHub repository; React + TypeScript; Node/Express + TypeScript; database and Redis; lint/format; environment variables.
 - **Actual implementation:** `client/` (React 19, Vite, TypeScript, ESLint flat config) and `server/` (Express 5, TypeScript, `tsx` for development, `tsc` for build). PostgreSQL through Prisma. Redis arrives through BullMQ and `docker-compose.yml`. `.env.example` files exist in `server/` and `client/`. No Prettier configuration and no ESLint configuration exist for `server/`; only the client has `npm run lint`.
 - **Files and components:** `client/package.json`, `client/vite.config.ts`, `client/eslint.config.js`, `server/package.json`, `server/tsconfig.json`, `server/.env.example`, `client/.env.example`, `.gitignore`, `.dockerignore`, `docker-compose.yml`.
-- **Technical workflow:** client (Vite dev server, default `http://localhost:5173`) calls the API at `VITE_API_URL` (default `http://localhost:5000/api`); the API reads `PORT` (default 5000) and `DATABASE_URL`.
+- **Technical workflow:** client (Vite dev server, now `http://localhost:8080`) calls the API at `VITE_API_URL` (default `/api`, proxied to the API); the API reads `PORT` (default 4000; originally 5000, with the client on 5173, before ports were unified on 8080) and `DATABASE_URL`.
 - **Result:** Implemented.
 - **Known gaps:** no server lint/format tooling; no CI workflow files exist.
 - **Connection to Day 2:** a running API and database make user accounts the first feature.

@@ -106,7 +106,7 @@ export const githubCallback = async (req: Request, res: Response) => {
     });
 
     clearStateCookie();
-    const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:5173";
+    const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:8080";
     return res.redirect(frontendUrl);
   } catch (error: any) {
     clearStateCookie();
