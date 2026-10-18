@@ -215,3 +215,26 @@ progress { width: 100%; max-width: 320px; }
   .auth-card { padding: 20px 16px; }
   h1 { font-size: 1.5rem; }
 }
+
+/* Loading circle for long-running scan/repair jobs. */
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-right: 0.5em;
+  vertical-align: -0.15em;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spinner-rotate 0.8s linear infinite;
+}
+
+@keyframes spinner-rotate {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 2.4s; }
+}
+
+.card .form-error { margin: 12px 0 0; }

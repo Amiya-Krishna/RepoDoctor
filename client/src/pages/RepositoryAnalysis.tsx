@@ -11,6 +11,12 @@ import type {
   Repository,
 } from "../types/repository";
 
+import Spinner from "../components/Spinner";
+
+/** Repair job states during which the worker is still waiting for the AI/API. */
+const isRepairActive = (status?: string) =>
+  status === "QUEUING" || status === "QUEUED" || status === "RUNNING" || status === "RETRYING";
+
 interface Props {
   repositoryId: string;
 }
@@ -249,11 +255,12 @@ function RepositoryAnalysis({
               <p>{finding.filePath}:{finding.lineStart}-{finding.lineEnd}</p>
               <p>Confidence: {Math.round(finding.confidence * 100)}%</p>
               <p><strong>Suggested fix:</strong> {finding.suggestedFix}</p>
-              <button onClick={() => void queueRepair(finding.id)} disabled={repairStates[finding.id]?.status === "QUEUING" || repairStates[finding.id]?.status === "QUEUED" || repairStates[finding.id]?.status === "RUNNING"}>
+              <button onClick={() => void queueRepair(finding.id)} disabled={isRepairActive(repairStates[finding.id]?.status)}>
                 Attempt autonomous repair
               </button>
               {repairStates[finding.id] && (
                 <p aria-live="polite">
+                  {isRepairActive(repairStates[finding.id].status) && <Spinner label="Repair in progress" />}
                   {repairStates[finding.id].status}: {repairStates[finding.id].message}
                   {repairStates[finding.id].pullRequestUrl && (
                     <>{" "}<a href={repairStates[finding.id].pullRequestUrl} target="_blank" rel="noreferrer">Open pull request</a></>
@@ -270,11 +277,12 @@ function RepositoryAnalysis({
               <p>{finding.description}</p>
               <p>{finding.filePath}:{finding.lineStart}-{finding.lineEnd}</p>
               <p><strong>Evidence:</strong> {finding.evidence}</p>
-              <button onClick={() => void queueRepair(finding.id)} disabled={repairStates[finding.id]?.status === "QUEUING" || repairStates[finding.id]?.status === "QUEUED" || repairStates[finding.id]?.status === "RUNNING"}>
+              <button onClick={() => void queueRepair(finding.id)} disabled={isRepairActive(repairStates[finding.id]?.status)}>
                 Attempt autonomous repair
               </button>
               {repairStates[finding.id] && (
                 <p aria-live="polite">
+                  {isRepairActive(repairStates[finding.id].status) && <Spinner label="Repair in progress" />}
                   {repairStates[finding.id].status}: {repairStates[finding.id].message}
                   {repairStates[finding.id].pullRequestUrl && (
                     <>{" "}<a href={repairStates[finding.id].pullRequestUrl} target="_blank" rel="noreferrer">Open pull request</a></>

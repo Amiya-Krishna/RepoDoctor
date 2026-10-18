@@ -10,6 +10,7 @@ import {
 import type { Repository } from "../types/repository";
 import RepositoryAnalysis from "./RepositoryAnalysis";
 import AnalysisHistory from "./AnalysisHistory";
+import Spinner from "../components/Spinner";
 
 interface ScanProgress {
   jobId?: string;
@@ -33,6 +34,7 @@ function Repositories() {
   const [activeJobs, setActiveJobs] = useState<Record<string, string>>({});
   const [progressByRepository, setProgressByRepository] = useState<Record<string, ScanProgress>>({});
   const [error, setError] = useState("");
+  const [deleteErrors, setDeleteErrors] = useState<Record<string, string>>({});
   const [githubConnected, setGithubConnected] = useState(true);
   const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | null>(null);
 
@@ -199,6 +201,11 @@ function Repositories() {
 
   const handleDelete = async (repositoryId: string) => {
     if (!window.confirm("Remove this repository and its analysis history from RepoDoctor?")) return;
+    setDeleteErrors((current) => {
+      const next = { ...current };
+      delete next[repositoryId];
+      return next;
+    });
     try {
       await api.delete(`/repositories/${encodeURIComponent(repositoryId)}`, {
         headers: authHeaders(),
@@ -211,7 +218,11 @@ function Repositories() {
       });
       if (selectedRepositoryId === repositoryId) setSelectedRepositoryId(null);
     } catch (deleteError) {
-      setError(getErrorMessage(deleteError, "Failed to remove repository"));
+      // Shown on the repository's own card (e.g. 409: it has repair jobs).
+      setDeleteErrors((current) => ({
+        ...current,
+        [repositoryId]: getErrorMessage(deleteError, "Failed to remove repository"),
+      }));
     }
   };
 
@@ -267,6 +278,8 @@ function Repositories() {
       ) : repositories.map((repository) => {
         const progress = progressByRepository[repository.id];
         const busy = Boolean(activeJobs[repository.id]);
+        const working = busy || ["QUEUED", "PENDING", "RUNNING", "ACTIVE", "RETRYING"].includes(progress?.status ?? "");
+        const deleteError = deleteErrors[repository.id];
 
         return (
           <article key={repository.id} className="card">
@@ -274,6 +287,7 @@ function Repositories() {
             <p>{repository.fullName}</p>
             <p>Default branch: {repository.defaultBranch}</p>
             <button onClick={() => void handleAnalyze(repository.id)} disabled={busy}>
+              {busy && <Spinner label="Scan in progress" />}
               {busy ? "Scan queued/running…" : "Analyze Repository"}
             </button>
             <button onClick={() => setSelectedRepositoryId(repository.id)}>
@@ -283,9 +297,14 @@ function Repositories() {
               Remove repository
             </button>
 
+            {deleteError && <p role="alert" className="form-error">{deleteError}</p>}
+
             {progress && (
               <div aria-live="polite" style={{ marginTop: 12 }}>
-                <p><strong>Status:</strong> {progress.status ?? progress.stage ?? "Queued"}</p>
+                <p>
+                  {working && <Spinner label="Scan in progress" />}
+                  <strong>Status:</strong> {progress.status ?? progress.stage ?? "Queued"}
+                </p>
                 <p>{progress.message}</p>
                 {typeof progress.percent === "number" && (
                   <progress value={progress.percent} max={100} />
