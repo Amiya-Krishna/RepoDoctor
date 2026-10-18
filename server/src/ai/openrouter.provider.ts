@@ -89,7 +89,12 @@ export class OpenRouterProvider implements AIProvider {
               schema,
             },
           },
-        });
+
+          // OpenRouter-specific: only route to providers that really support
+          // response_format; otherwise the schema is silently ignored and the
+          // model returns free text that fails JSON.parse.
+          provider: { require_parameters: true },
+        } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
 
       const content =
         response.choices[0]?.message?.content;

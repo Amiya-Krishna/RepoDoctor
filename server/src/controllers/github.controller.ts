@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../config/prisma.js";
+import { describeError, upstreamStatus } from "../security/safe-error.js";
 import { protectToken, revealToken } from "../security/token-encryption.js";
 import {
   exchangeCodeForToken,
@@ -41,7 +42,7 @@ export const connectGitHub = async (req: Request, res: Response) => {
 
     return res.json({ authUrl: getGitHubAuthUrl(state) });
   } catch (error) {
-    console.error("GitHub connect error:", error);
+    console.error("GitHub connect error:", describeError(error));
     return res.status(500).json({ message: "Failed to create GitHub authorization URL" });
   }
 };
@@ -171,7 +172,21 @@ export const getRepositories = async (req: Request, res: Response) => {
       repositories,
     });
   } catch (error) {
-    console.error("Get repositories error:", error);
+    // GitHub rejected the stored token (revoked, or issued by another OAuth
+    // app). Forget it so the client offers "Connect GitHub" again.
+    if (upstreamStatus(error) === 401) {
+      console.warn("Stored GitHub token was rejected (401); clearing it so the user can reconnect");
+      await prisma.user
+        .update({
+          where: { id: (req as any).user.userId },
+          data: { githubAccessToken: null },
+        })
+        .catch(() => undefined);
+      return res.status(400).json({ message: "GitHub account is not connected" });
+    }
+
+    // Never log the raw error: Axios errors contain the Authorization header.
+    console.error("Get repositories error:", describeError(error));
 
     return res.status(500).json({
       message: "Failed to fetch repositories",
