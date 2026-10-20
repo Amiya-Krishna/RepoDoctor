@@ -115,6 +115,12 @@ export class OpenRouterProvider implements AIProvider {
     } catch (error: any) {
       const status = error?.status;
 
+      // 404 "No endpoints found": the routed model cannot honour a strict
+      // json_schema. Ask for plain JSON and validate on our side instead.
+      if (status === 404 || status === 400) {
+        return this.generateStructuredFallback<T>(systemPrompt, userPrompt, schema);
+      }
+
       const message =
         error?.error?.message ??
         error?.message ??
@@ -122,6 +128,48 @@ export class OpenRouterProvider implements AIProvider {
 
       throw new Error(
         `OpenRouter structured request failed (${status ?? "unknown"}): ${message}`
+      );
+    }
+  }
+
+  private async generateStructuredFallback<T>(
+    systemPrompt: string,
+    userPrompt: string,
+    schema: Record<string, unknown>
+  ): Promise<T> {
+    try {
+      const response = await this.client.chat.completions.create({
+        model: aiConfig.openrouterModel,
+        messages: [
+          {
+            role: "system",
+            content:
+              `${systemPrompt}\n\nRespond with ONLY a single JSON object (no markdown, no commentary) ` +
+              `that conforms to this JSON schema:\n${JSON.stringify(schema)}`,
+          },
+          { role: "user", content: userPrompt },
+        ],
+      });
+
+      const raw = response.choices[0]?.message?.content ?? "";
+      const cleaned = raw
+        .trim()
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/, "");
+      const start = cleaned.indexOf("{");
+      const end = cleaned.lastIndexOf("}");
+
+      if (start === -1 || end <= start) {
+        throw new Error("OpenRouter fallback returned no JSON object");
+      }
+
+      return JSON.parse(cleaned.slice(start, end + 1)) as T;
+    } catch (error: any) {
+      const message =
+        error?.error?.message ?? error?.message ?? "Unknown OpenRouter error";
+
+      throw new Error(
+        `OpenRouter structured fallback failed (${error?.status ?? "unknown"}): ${message}`
       );
     }
   }

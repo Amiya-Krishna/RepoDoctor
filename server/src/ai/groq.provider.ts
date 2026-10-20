@@ -7,6 +7,9 @@ import { aiConfig } from "./ai.config.js";
 export class GroqProvider implements AIProvider {
   private readonly client: OpenAI;
 
+  // Groq's on-demand tier caps a request at ~8000 tokens per minute; bigger prompts always get a 413.
+  readonly maxInputTokens = Number(process.env.GROQ_MAX_INPUT_TOKENS ?? 6500);
+
   constructor() {
     if (!aiConfig.groqApiKey) {
       throw new Error("GROQ_API_KEY is not configured");
