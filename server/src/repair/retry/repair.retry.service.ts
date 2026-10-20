@@ -17,7 +17,7 @@ import {
   removeRepairWorkspace,
 } from "../repair.workspace.js";
 
-import { applyFixResult } from "../repair.patch.js";
+import { applyFixResult, RepairPatchError } from "../repair.patch.js";
 
 import { runDockerTest } from "../../execution/docker.runner.js";
 import {
@@ -75,6 +75,7 @@ export const runRepairRetryLoop = async (
 
   let previousTestResult: DockerTestResult | undefined;
   let previousVerification: VerificationResult | undefined;
+  let previousPatchError: string | undefined;
 
   for (
     let attemptNumber = 1;
@@ -123,7 +124,17 @@ export const runRepairRetryLoop = async (
        */
       let retryFinding = finding;
 
-      if (previousTestResult && previousVerification) {
+      if (previousPatchError) {
+        retryFinding = {
+          ...finding,
+          description: [
+            finding.description,
+            "",
+            "PREVIOUS ATTEMPT COULD NOT BE APPLIED:",
+            previousPatchError,
+          ].join("\n"),
+        };
+      } else if (previousTestResult && previousVerification) {
         const replanningContext = buildReplanningContext({
           attemptNumber,
           previousTestResult,
@@ -193,6 +204,7 @@ export const runRepairRetryLoop = async (
        * disposable repair workspace.
        */
       await applyFixResult(workspace.repositoryPath, fixResult);
+      previousPatchError = undefined;
 
       /*
        * Execute tests through Docker.
@@ -374,6 +386,21 @@ export const runRepairRetryLoop = async (
         status: "ERROR",
         summary: message,
       });
+
+      /*
+       * A patch that does not line up with the real file is the model's
+       * mistake, not an environment fault: give it the file's actual text
+       * and try again.
+       */
+      if (
+        error instanceof RepairPatchError &&
+        canRetry(attemptNumber, DEFAULT_RETRY_POLICY)
+      ) {
+        previousPatchError = message;
+        previousTestResult = undefined;
+        previousVerification = undefined;
+        continue;
+      }
 
       return {
         status: "ERROR",

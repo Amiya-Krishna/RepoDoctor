@@ -87,33 +87,104 @@ const validateLineRange = (
   }
 };
 
-const validateOriginalCode = (
+/**
+ * Raised when a proposed change cannot be applied to the real file. The retry
+ * loop treats this as recoverable: the message is fed back to the model.
+ */
+export class RepairPatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RepairPatchError";
+  }
+}
+
+const MAX_RELOCATION_DISTANCE = 25;
+
+const normalizeBlock = (code: string): string[] => {
+  const lines = code
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim());
+
+  while (lines.length > 0 && lines[0] === "") lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+
+  return lines;
+};
+
+const blockMatchesAt = (
+  lines: string[],
+  expected: string[],
+  startIndex: number,
+): boolean => {
+  if (startIndex < 0 || startIndex + expected.length > lines.length) {
+    return false;
+  }
+
+  return expected.every(
+    (line, offset) => lines[startIndex + offset].trim() === line,
+  );
+};
+
+/**
+ * Confirms that the code the model says it is replacing really is in the file.
+ *
+ * Comparison ignores indentation and line-ending differences. Models often
+ * get line numbers slightly wrong, so when the stated range does not match,
+ * the block is searched for nearby and the change is moved to where it
+ * actually is. Anything else is a hard mismatch.
+ */
+const resolveOriginalCode = (
   lines: string[],
   change: FixChange,
-): void => {
+): FixChange => {
   if (change.changeType !== "REPLACE") {
-    return;
+    return change;
   }
 
-  const actualCode = getSelectedLines(
-    lines,
-    change.startLine,
-    change.endLine,
-  );
-
-  const expectedCode = change.originalCode
-    .replace(/\r\n/g, "\n")
-    .trim();
+  const expected = normalizeBlock(change.originalCode);
+  const statedIndex = change.startLine - 1;
 
   if (
-    actualCode
-      .replace(/\r\n/g, "\n")
-      .trim() !== expectedCode
+    expected.length > 0 &&
+    blockMatchesAt(lines, expected, statedIndex) &&
+    change.endLine - change.startLine + 1 === expected.length
   ) {
-    throw new Error(
-      `Original code mismatch for ${change.filePath} at lines ${change.startLine}-${change.endLine}`,
-    );
+    return change;
   }
+
+  if (expected.length > 0) {
+    const candidates: number[] = [];
+
+    for (let index = 0; index + expected.length <= lines.length; index++) {
+      if (blockMatchesAt(lines, expected, index)) {
+        candidates.push(index);
+      }
+    }
+
+    const closest = candidates
+      .map((index) => ({ index, distance: Math.abs(index - statedIndex) }))
+      .sort((a, b) => a.distance - b.distance)[0];
+
+    if (closest && closest.distance <= MAX_RELOCATION_DISTANCE) {
+      return {
+        ...change,
+        startLine: closest.index + 1,
+        endLine: closest.index + expected.length,
+      };
+    }
+  }
+
+  const actual = lines
+    .slice(Math.max(0, statedIndex), change.endLine)
+    .join("\n")
+    .slice(0, 600);
+
+  throw new RepairPatchError(
+    `Original code mismatch for ${change.filePath} at lines ${change.startLine}-${change.endLine}. ` +
+      `The file actually contains at those lines:\n${actual}\n` +
+      "Copy originalCode exactly from the repository context and use the correct line numbers.",
+  );
 };
 
 const applyChange = (
@@ -211,6 +282,7 @@ export const applyFixResult = async (
     );
 
     let lines = getFileLines(content);
+    const lineEnding = content.includes("\r\n") ? "\r\n" : "\n";
 
     /*
      * Apply from bottom to top so line numbers from
@@ -222,12 +294,12 @@ export const applyFixResult = async (
         b.endLine - a.endLine,
     );
 
-    for (const change of sortedChanges) {
-      validateLineRange(lines, change);
+    for (const proposedChange of sortedChanges) {
+      validateLineRange(lines, proposedChange);
 
-      validateOriginalCode(
+      const change = resolveOriginalCode(
         lines,
-        change,
+        proposedChange,
       );
 
       lines = applyChange(
@@ -245,7 +317,7 @@ export const applyFixResult = async (
 
     await fs.writeFile(
       absolutePath,
-      lines.join("\n"),
+      lines.join(lineEnding),
       "utf8",
     );
   }
