@@ -318,6 +318,11 @@ export const runRepairRetryLoop = async (
           verificationResultId: verificationRecord.id,
           summary: [
             testResult.errorMessage,
+            `[ran "${testCommand.join(" ")}" in ${workingDirectory || "repository root"}; dependencies installed for: ${
+              dependencyVolumes.length
+                ? dependencyVolumes.map((volume) => volume.directory || "root").join(", ")
+                : "none (no package.json found at the root or in its direct sub-folders)"
+            }]`,
             verification.summary,
             verification.reasoning
               ? `Why inconclusive: ${verification.reasoning.slice(0, 400)}`
