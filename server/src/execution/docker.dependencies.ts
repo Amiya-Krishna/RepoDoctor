@@ -4,10 +4,12 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { envPositiveInt } from "../config/env-number.js";
+
 const execFileAsync = promisify(execFile);
 
 const NODE_IMAGE = "node:22-bookworm-slim";
-const INSTALL_TIMEOUT_MS = Number(process.env.REPAIR_INSTALL_TIMEOUT_MS ?? 300_000);
+const INSTALL_TIMEOUT_MS = envPositiveInt("REPAIR_INSTALL_TIMEOUT_MS", 300_000);
 
 const tail = (value: string, max = 1500): string =>
   value.length <= max ? value : `…${value.slice(-max)}`;

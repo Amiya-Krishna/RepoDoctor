@@ -3,12 +3,13 @@ import OpenAI from "openai";
 import type { AIProvider } from "./ai.provider.js";
 
 import { aiConfig } from "./ai.config.js";
+import { envPositiveInt } from "../config/env-number.js";
 
 export class GroqProvider implements AIProvider {
   private readonly client: OpenAI;
 
   // Groq's on-demand tier caps a request at ~8000 tokens per minute; bigger prompts always get a 413.
-  readonly maxInputTokens = Number(process.env.GROQ_MAX_INPUT_TOKENS ?? 6500);
+  readonly maxInputTokens = envPositiveInt("GROQ_MAX_INPUT_TOKENS", 6500);
 
   constructor() {
     if (!aiConfig.groqApiKey) {

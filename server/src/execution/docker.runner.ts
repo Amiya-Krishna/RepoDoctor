@@ -3,6 +3,8 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
+import { envPositiveInt } from "../config/env-number.js";
+
 import type {
   DockerTestInput,
   DockerTestResult,
@@ -10,7 +12,7 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
-const DEFAULT_TIMEOUT_MS = Number(process.env.REPAIR_TEST_TIMEOUT_MS ?? 180_000);
+const DEFAULT_TIMEOUT_MS = envPositiveInt("REPAIR_TEST_TIMEOUT_MS", 180_000);
 const DEFAULT_MEMORY_LIMIT = process.env.REPAIR_TEST_MEMORY ?? "1g";
 const DEFAULT_CPU_LIMIT = process.env.REPAIR_TEST_CPUS ?? "2";
 const DEFAULT_PIDS_LIMIT = 128;

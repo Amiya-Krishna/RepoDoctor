@@ -1,7 +1,8 @@
 import type { AIProvider } from "./ai.provider.js";
+import { envPositiveInt } from "../config/env-number.js";
 
-const TRANSIENT_RETRIES = Number(process.env.AI_TRANSIENT_RETRIES ?? 2);
-const RETRY_BASE_DELAY_MS = Number(process.env.AI_RETRY_BASE_DELAY_MS ?? 3000);
+const TRANSIENT_RETRIES = envPositiveInt("AI_TRANSIENT_RETRIES", 2);
+const RETRY_BASE_DELAY_MS = envPositiveInt("AI_RETRY_BASE_DELAY_MS", 3000);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
