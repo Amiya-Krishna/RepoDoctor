@@ -11,8 +11,8 @@ import type {
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.REPAIR_TEST_TIMEOUT_MS ?? 180_000);
-const DEFAULT_MEMORY_LIMIT = "512m";
-const DEFAULT_CPU_LIMIT = "1";
+const DEFAULT_MEMORY_LIMIT = process.env.REPAIR_TEST_MEMORY ?? "1g";
+const DEFAULT_CPU_LIMIT = process.env.REPAIR_TEST_CPUS ?? "2";
 const DEFAULT_PIDS_LIMIT = 128;
 
 const MAX_OUTPUT_SIZE = 1_000_000;
@@ -77,6 +77,7 @@ export const runDockerTest = async (
   let stderr = "";
   let exitCode: number | null = null;
   let timedOut = false;
+  let errorMessage: string | undefined;
 
   try {
     const dockerArgs = [
@@ -138,7 +139,7 @@ export const runDockerTest = async (
           {
             windowsHide: true,
             timeout: timeoutMs,
-            maxBuffer: 2_000_000,
+            maxBuffer: 20_000_000,
           },
         );
 
@@ -154,6 +155,7 @@ export const runDockerTest = async (
           stderr?: string;
           killed?: boolean;
           signal?: string;
+          message?: string;
         };
 
       stdout =
@@ -177,6 +179,19 @@ export const runDockerTest = async (
       } else {
         exitCode = null;
       }
+
+      if (timedOut) {
+        errorMessage =
+          `The test command did not finish within ${Math.round(timeoutMs / 1000)}s ` +
+          "(raise REPAIR_TEST_TIMEOUT_MS if the repository's build or tests are slow).";
+      } else if (exitCode === null) {
+        errorMessage =
+          `Docker could not run the test command (${commandError.code ?? commandError.signal ?? "unknown error"}): ` +
+          `${(commandError.message ?? "").slice(0, 300)}`;
+      } else if (exitCode === 125 || exitCode === 126 || exitCode === 127) {
+        errorMessage =
+          `Docker exited with code ${exitCode}; the command or image could not be started. ${stderr.slice(-300)}`;
+      }
     }
 
     return {
@@ -190,7 +205,11 @@ export const runDockerTest = async (
         truncateOutput(stdout),
 
       stderr:
-        truncateOutput(stderr),
+        truncateOutput(
+          errorMessage ? `${stderr}\n[RepoDoctor] ${errorMessage}` : stderr,
+        ),
+
+      ...(errorMessage ? { errorMessage } : {}),
 
       durationMs:
         Date.now() - startedAt,

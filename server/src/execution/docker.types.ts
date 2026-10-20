@@ -17,4 +17,6 @@ export interface DockerTestResult {
   stderr: string;
   durationMs: number;
   timedOut: boolean;
+  /** Set when the run did not complete (timeout, Docker failure, output overflow). */
+  errorMessage?: string;
 }

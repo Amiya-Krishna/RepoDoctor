@@ -314,7 +314,9 @@ export const runRepairRetryLoop = async (
           fixProposalId: proposal.id,
           dockerTestRunId: dockerTestRun.id,
           verificationResultId: verificationRecord.id,
-          summary: verification.summary,
+          summary: testResult.errorMessage
+            ? `${testResult.errorMessage} ${verification.summary}`
+            : verification.summary,
         });
 
         previousTestResult = testResult;
