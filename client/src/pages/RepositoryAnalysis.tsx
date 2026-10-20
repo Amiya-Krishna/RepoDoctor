@@ -13,9 +13,14 @@ import type {
 
 import Spinner from "../components/Spinner";
 
-/** Repair job states during which the worker is still waiting for the AI/API. */
+/** Final states: once one of these arrives the repair is over and the spinner stops. */
+const FINAL_REPAIR_STATUSES = new Set([
+  "VERIFIED", "FAILED", "INCONCLUSIVE", "MAX_RETRIES_REACHED", "ERROR", "COMPLETED",
+]);
+
+/** A repair is "active" from the click until a final result (or failure) is received. */
 const isRepairActive = (status?: string) =>
-  status === "QUEUING" || status === "QUEUED" || status === "RUNNING" || status === "RETRYING";
+  !!status && !FINAL_REPAIR_STATUSES.has(status);
 
 interface Props {
   repositoryId: string;
@@ -89,7 +94,8 @@ function RepositoryAnalysis({
         [event.findingId!]: {
           ...current[event.findingId!],
           jobId: event.jobId,
-          status: event.status ?? event.stage ?? "RUNNING",
+          // Progress events carry a stage name ("testing", ...), not a final status.
+          status: "RUNNING",
           message: event.message ?? "Repair in progress",
         },
       }));
@@ -97,7 +103,7 @@ function RepositoryAnalysis({
 
     socket.on("repair:completed", (event: {
       analysisId?: string; findingId?: string; jobId?: string;
-      result?: { status?: string; pullRequest?: { url?: string } };
+      result?: { status?: string; summary?: string; pullRequest?: { url?: string } };
     }) => {
       if (event.analysisId !== analysis.id || !event.findingId) return;
       setRepairStates((current) => ({
@@ -107,7 +113,7 @@ function RepositoryAnalysis({
           status: event.result?.status ?? "COMPLETED",
           message: event.result?.pullRequest?.url
             ? "Verified repair published as a pull request."
-            : `Repair finished with status ${event.result?.status ?? "COMPLETED"}. No pull request was created.`,
+            : `Repair finished with status ${event.result?.status ?? "COMPLETED"}. No pull request was created.${event.result?.summary ? ` Reason: ${event.result.summary}` : ""}`,
           pullRequestUrl: event.result?.pullRequest?.url,
         },
       }));
@@ -256,7 +262,7 @@ function RepositoryAnalysis({
               <p>Confidence: {Math.round(finding.confidence * 100)}%</p>
               <p><strong>Suggested fix:</strong> {finding.suggestedFix}</p>
               <button onClick={() => void queueRepair(finding.id)} disabled={isRepairActive(repairStates[finding.id]?.status)}>
-                Attempt autonomous repair
+                {isRepairActive(repairStates[finding.id]?.status) ? "Repairing…" : "Attempt autonomous repair"}
               </button>
               {repairStates[finding.id] && (
                 <p aria-live="polite">
@@ -278,7 +284,7 @@ function RepositoryAnalysis({
               <p>{finding.filePath}:{finding.lineStart}-{finding.lineEnd}</p>
               <p><strong>Evidence:</strong> {finding.evidence}</p>
               <button onClick={() => void queueRepair(finding.id)} disabled={isRepairActive(repairStates[finding.id]?.status)}>
-                Attempt autonomous repair
+                {isRepairActive(repairStates[finding.id]?.status) ? "Repairing…" : "Attempt autonomous repair"}
               </button>
               {repairStates[finding.id] && (
                 <p aria-live="polite">

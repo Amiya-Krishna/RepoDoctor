@@ -432,6 +432,56 @@ npm run test:e2e                     # E2E_BASE_URL overrides the client URL (de
 
 The full list of `test:*` scripts is in `server/package.json` (many call AI providers or GitHub and need real credentials). Step-by-step manual checks are in the [manual testing guide](docs/MANUAL_TESTING_GUIDE.md).
 
+## Troubleshooting
+
+Commands below are PowerShell. For local development, start the services in this order, each in its own terminal (the last three from `server/`): Redis, then `npm run dev`, `npm run worker`, `npm run repair-worker`.
+
+### Redis connection refused (`ECONNREFUSED 127.0.0.1:6379`)
+
+**Cause:** the scan or repair worker cannot reach Redis, because it is stopped or was never created.
+
+**Resolution:** check the container state, then apply the matching command.
+
+```powershell
+docker ps -a --filter name=repodoctor-redis
+```
+
+| State | Command |
+| --- | --- |
+| Running, port `0.0.0.0:6379->6379/tcp` shown | Nothing to start. Confirm `REDIS_HOST`, `REDIS_PORT` and `REDIS_PASSWORD` in `server/.env` (leave the password empty for the container below), then restart the worker. |
+| Listed as `Exited` | `docker start repodoctor-redis` |
+| Not listed | `docker run -d --name repodoctor-redis -p 6379:6379 redis:7-alpine` |
+| Wrong or missing port mapping | `docker rm -f repodoctor-redis`, then run the `docker run` command above |
+
+`docker run` failing with *container name is already in use* means the container already exists; use `docker start` instead.
+
+**Verify:** `docker exec repodoctor-redis redis-cli ping` returns `PONG`. Workers reconnect automatically; restart them if errors continue.
+
+### Database unreachable (Prisma `P1001`, Neon)
+
+**Cause:** the Neon compute was suspended and still waking up, the pooled endpoint is in use, or outbound port 5432 is blocked.
+
+**Resolution:**
+1. Retry once; a suspended Neon compute usually starts on the first attempt.
+2. Use the direct endpoint in `DATABASE_URL` (remove `-pooler` from the host) and keep `?sslmode=require&connect_timeout=30`.
+3. Confirm the Neon project is not paused and that your network or VPN allows port 5432.
+
+### Autonomous repair ends as `INCONCLUSIVE`, `ERROR` or `MAX_RETRIES_REACHED`
+
+The reason is shown in the UI after the status. A pull request is only created for `VERIFIED`.
+
+| Message | Cause | Resolution |
+| --- | --- | --- |
+| Docker is not available to the repair worker | Docker is not running where `npm run repair-worker` runs | Start Docker Desktop, confirm `docker info` works in that terminal, retry |
+| No usable "test" script in package.json | The repository has no test script | Set the **Test command** field to a command the repository supports, for example `npm run lint` |
+| Dependency installation failed | Private packages, an out-of-sync lockfile, or Docker has no internet | Read the npm error in the message and fix the cause. Dependencies install with network access and scripts disabled; tests then run offline |
+| Timed out | Install or tests exceeded the limit | Raise `REPAIR_TEST_TIMEOUT_MS` (default `180000`) or `REPAIR_INSTALL_TIMEOUT_MS` (default `300000`) in `server/.env`, restart the repair worker |
+| Tests failed in every attempt | The generated patch did not satisfy the tests | Use a more specific test command or a finding with clearer evidence |
+
+The progress spinner runs until a final result arrives. If it never stops, the repair worker is not running or cannot reach Redis; see the Redis section.
+
+Docker volumes left behind by an interrupted run can be removed with `docker volume prune`.
+
 ## Documentation
 
 1. [Architecture](docs/ARCHITECTURE.md) — reference diagram, stack, API surface, flows, trust boundaries.

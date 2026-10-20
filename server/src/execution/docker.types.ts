@@ -6,6 +6,8 @@ export interface DockerTestInput {
   cpuLimit?: string;
   pidsLimit?: number;
   environment?: Record<string, string>;
+  /** Docker volume holding installed node_modules, mounted over the repository's node_modules. */
+  nodeModulesVolume?: string;
 }
 
 export interface DockerTestResult {

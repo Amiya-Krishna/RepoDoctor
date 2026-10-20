@@ -17,6 +17,8 @@ export interface AutonomousRepairJobResult {
   analysisId: string;
   findingId: string;
   status: string;
+  /** Human-readable reason from the last attempt (why no pull request was created). */
+  summary?: string;
   pullRequest?: {
     number: number;
     url: string;

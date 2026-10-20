@@ -10,7 +10,7 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = Number(process.env.REPAIR_TEST_TIMEOUT_MS ?? 180_000);
 const DEFAULT_MEMORY_LIMIT = "512m";
 const DEFAULT_CPU_LIMIT = "1";
 const DEFAULT_PIDS_LIMIT = 128;
@@ -50,9 +50,14 @@ export const runDockerTest = async (
     input.pidsLimit ??
     DEFAULT_PIDS_LIMIT;
 
-  const environmentArgs = Object.entries(
-      input.environment ?? {},
-    ).flatMap(([key, value]) => [
+  // Defaults make npm/node tooling work on the read-only root filesystem and
+  // stop test runners from entering watch mode (which would hang until timeout).
+  const environmentArgs = Object.entries({
+      HOME: "/tmp",
+      npm_config_cache: "/tmp/.npm",
+      CI: "true",
+      ...(input.environment ?? {}),
+    }).flatMap(([key, value]) => [
       "-e",
       `${key}=${value}`,
     ]);
@@ -110,6 +115,10 @@ export const runDockerTest = async (
 
       "-v",
       `${repositoryPath}:/workspace/repository:rw`,
+
+      ...(input.nodeModulesVolume
+        ? ["-v", `${input.nodeModulesVolume}:/workspace/repository/node_modules`]
+        : []),
 
       "-w",
       "/workspace/repository",

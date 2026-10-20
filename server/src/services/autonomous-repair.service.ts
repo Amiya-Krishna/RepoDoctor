@@ -25,6 +25,11 @@ import type {
 } from "../agents/security.types.js";
 
 import {
+  assertDockerAvailable,
+  assertTestCommandRunnable,
+} from "../execution/docker.dependencies.js";
+
+import {
   saveRepairAttempt,
 } from "./repair-job-history.service.js";
 
@@ -80,6 +85,14 @@ export const runAutonomousRepair = async (
       "testCommand cannot be empty.",
     );
   }
+
+  // Fail early with a readable reason instead of burning AI attempts that
+  // can never be verified.
+  await assertDockerAvailable();
+  await assertTestCommandRunnable(
+    input.sourceRepositoryPath,
+    input.testCommand,
+  );
 
   const repairJob =
     await createRepairJob(

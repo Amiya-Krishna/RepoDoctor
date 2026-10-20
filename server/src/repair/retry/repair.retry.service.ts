@@ -20,6 +20,11 @@ import {
 import { applyFixResult } from "../repair.patch.js";
 
 import { runDockerTest } from "../../execution/docker.runner.js";
+import {
+  installDependencies,
+  removeDependencyVolume,
+  type DependencyVolume,
+} from "../../execution/docker.dependencies.js";
 
 import { DEFAULT_RETRY_POLICY, canRetry } from "./retry.policy.js";
 
@@ -89,6 +94,7 @@ export const runRepairRetryLoop = async (
     );
 
     let workspace;
+    let dependencyVolume: DependencyVolume | undefined;
 
     try {
       /*
@@ -192,8 +198,12 @@ export const runRepairRetryLoop = async (
        * Execute tests through Docker.
        */
       await onProgress?.("testing", `Running isolated Docker tests for attempt ${attemptNumber}`, 55 + (attemptNumber - 1) * 10);
+      await onProgress?.("installing", `Installing dependencies for attempt ${attemptNumber}`, 50 + (attemptNumber - 1) * 10);
+      dependencyVolume = await installDependencies(workspace.repositoryPath);
+
       const testResult = await runDockerTest({
         repositoryPath: workspace.repositoryPath,
+        nodeModulesVolume: dependencyVolume?.name,
         testCommand,
         environment: {
           REPO_DOCTOR_ATTEMPT: String(attemptNumber),
@@ -295,10 +305,26 @@ export const runRepairRetryLoop = async (
           summary: verification.summary,
         });
 
-        return {
-          status: "INCONCLUSIVE",
-          attempts,
-        };
+        previousTestResult = testResult;
+        previousVerification = verification;
+
+        /*
+         * No exit code / timeout means the environment (Docker) is at fault,
+         * which another model attempt cannot fix. Otherwise the evidence was
+         * merely ambiguous, so give the model another attempt with that
+         * evidence. INCONCLUSIVE still never publishes a pull request.
+         */
+        const environmentFault =
+          testResult.exitCode === null || testResult.timedOut;
+
+        if (environmentFault || !canRetry(attemptNumber, DEFAULT_RETRY_POLICY)) {
+          return {
+            status: "INCONCLUSIVE",
+            attempts,
+          };
+        }
+
+        continue;
       }
 
       /*
@@ -357,6 +383,8 @@ export const runRepairRetryLoop = async (
       /*
        * NEVER retain the disposable repair workspace.
        */
+      await removeDependencyVolume(dependencyVolume);
+
       if (workspace) {
         await removeRepairWorkspace(workspace.rootPath);
       }
