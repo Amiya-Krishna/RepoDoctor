@@ -22,7 +22,7 @@ import { applyFixResult, RepairPatchError } from "../repair.patch.js";
 import { runDockerTest } from "../../execution/docker.runner.js";
 import {
   installDependencies,
-  removeDependencyVolume,
+  removeDependencyVolumes,
   type DependencyVolume,
 } from "../../execution/docker.dependencies.js";
 
@@ -67,6 +67,7 @@ export const runRepairRetryLoop = async (
   testCommand: string[],
   onVerified?: VerifiedRepairPublisher,
   onProgress?: (stage: string, message: string, percent: number) => Promise<void> | void,
+  workingDirectory = "",
 ): Promise<RetryLoopResult> => {
   const aiProvider = createAIProvider();
   const fixAgent = new FixAgent(aiProvider);
@@ -95,7 +96,7 @@ export const runRepairRetryLoop = async (
     );
 
     let workspace;
-    let dependencyVolume: DependencyVolume | undefined;
+    let dependencyVolumes: DependencyVolume[] = [];
 
     try {
       /*
@@ -211,11 +212,12 @@ export const runRepairRetryLoop = async (
        */
       await onProgress?.("testing", `Running isolated Docker tests for attempt ${attemptNumber}`, 55 + (attemptNumber - 1) * 10);
       await onProgress?.("installing", `Installing dependencies for attempt ${attemptNumber}`, 50 + (attemptNumber - 1) * 10);
-      dependencyVolume = await installDependencies(workspace.repositoryPath);
+      dependencyVolumes = await installDependencies(workspace.repositoryPath);
 
       const testResult = await runDockerTest({
         repositoryPath: workspace.repositoryPath,
-        nodeModulesVolume: dependencyVolume?.name,
+        nodeModulesVolumes: dependencyVolumes,
+        workingDirectory,
         testCommand,
         environment: {
           REPO_DOCTOR_ATTEMPT: String(attemptNumber),
@@ -418,7 +420,7 @@ export const runRepairRetryLoop = async (
       /*
        * NEVER retain the disposable repair workspace.
        */
-      await removeDependencyVolume(dependencyVolume);
+      await removeDependencyVolumes(dependencyVolumes);
 
       if (workspace) {
         await removeRepairWorkspace(workspace.rootPath);

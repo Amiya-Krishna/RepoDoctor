@@ -82,7 +82,7 @@ const start = async () => {
   const worker = new Worker<AutonomousRepairJobData, AutonomousRepairJobResult>(
     REPAIR_QUEUE_NAME,
     async (job) => {
-      const { userId, repositoryId, analysisId, findingId, testCommand } = job.data;
+      const { userId, repositoryId, analysisId, findingId, testCommand, workingDirectory } = job.data;
       const progress = async (stage: string, message: string, percent: number) => {
         try {
           await job.updateProgress({
@@ -149,6 +149,7 @@ const start = async () => {
           finding,
           sourceRepositoryPath,
           testCommand,
+          workingDirectory,
           publication: {
             owner: analysis.repository.ownerLogin,
             repo: analysis.repository.name,

@@ -10,6 +10,7 @@ export interface AutonomousRepairJobData {
   analysisId: string;
   findingId: string;
   testCommand: string[];
+  workingDirectory?: string;
 }
 
 export interface AutonomousRepairJobResult {

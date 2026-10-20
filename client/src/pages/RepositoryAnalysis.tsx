@@ -38,6 +38,7 @@ function RepositoryAnalysis({
   const [loading, setLoading] =
     useState(true);
   const [testCommand, setTestCommand] = useState("npm test");
+  const [workingDirectory, setWorkingDirectory] = useState("");
   const [repairStates, setRepairStates] = useState<Record<string, {
     jobId?: string;
     status: string;
@@ -152,6 +153,7 @@ function RepositoryAnalysis({
         analysisId: analysis.id,
         findingId,
         testCommand: command,
+        ...(workingDirectory.trim() ? { workingDirectory: workingDirectory.trim() } : {}),
       }, { headers: authHeaders() });
       setRepairStates((current) => ({
         ...current,
@@ -247,6 +249,15 @@ function RepositoryAnalysis({
               value={testCommand}
               onChange={(event) => setTestCommand(event.target.value)}
               placeholder="npm test"
+              style={{ display: "block", minWidth: 280, marginTop: 6 }}
+            />
+          </label>
+          <label style={{ display: "block", margin: "16px 0" }}>
+            Project folder (optional, e.g. client or server)
+            <input
+              value={workingDirectory}
+              onChange={(event) => setWorkingDirectory(event.target.value)}
+              placeholder="repository root"
               style={{ display: "block", minWidth: 280, marginTop: 6 }}
             />
           </label>

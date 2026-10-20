@@ -17,15 +17,28 @@ function validateTestCommand(value: unknown): string[] | null {
   return command;
 }
 
+function validateWorkingDirectory(value: unknown): string | null | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || value.length > 200 || value.includes("\0")) return null;
+  const parts = value.replace(/\\/g, "/").split("/").filter((part) => part !== "" && part !== ".");
+  if (parts.some((part) => part === "..") || value.startsWith("/")) return null;
+  return parts.join("/");
+}
+
 export const queueRepair = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user.userId as string;
     const { analysisId, findingId } = req.body ?? {};
     const testCommand = validateTestCommand(req.body?.testCommand);
+    const workingDirectory = validateWorkingDirectory(req.body?.workingDirectory);
 
     if (typeof analysisId !== "string" || !analysisId.trim()
       || typeof findingId !== "string" || !findingId.trim()) {
       return res.status(400).json({ message: "analysisId and findingId are required" });
+    }
+
+    if (workingDirectory === null) {
+      return res.status(400).json({ message: "workingDirectory must be a relative folder such as client" });
     }
 
     if (!testCommand) {
@@ -66,6 +79,7 @@ export const queueRepair = async (req: Request, res: Response) => {
       analysisId,
       findingId,
       testCommand,
+      ...(workingDirectory ? { workingDirectory } : {}),
     });
 
     return res.status(202).json({

@@ -27,6 +27,7 @@ import type {
 import {
   assertDockerAvailable,
   assertTestCommandRunnable,
+  resolveWorkingDirectory,
 } from "../execution/docker.dependencies.js";
 
 import {
@@ -47,6 +48,8 @@ export interface AutonomousRepairInput {
   sourceRepositoryPath: string;
 
   testCommand: string[];
+  /** Folder (relative to the repository root) to run the test command in, e.g. "client". */
+  workingDirectory?: string;
   publication?: RepairPublicationConfig;
   onProgress?: (stage: string, message: string, percent: number) => Promise<void> | void;
 }
@@ -89,9 +92,14 @@ export const runAutonomousRepair = async (
   // Fail early with a readable reason instead of burning AI attempts that
   // can never be verified.
   await assertDockerAvailable();
+  const workingDirectory = await resolveWorkingDirectory(
+    input.sourceRepositoryPath,
+    input.workingDirectory,
+  );
   await assertTestCommandRunnable(
     input.sourceRepositoryPath,
     input.testCommand,
+    workingDirectory,
   );
 
   const repairJob =
@@ -134,6 +142,7 @@ export const runAutonomousRepair = async (
         input.testCommand,
         onVerified,
         input.onProgress,
+        workingDirectory,
       );
 
     const currentAttempt =

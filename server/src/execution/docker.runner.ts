@@ -119,12 +119,15 @@ export const runDockerTest = async (
       "-v",
       `${repositoryPath}:/workspace/repository:rw`,
 
-      ...(input.nodeModulesVolume
-        ? ["-v", `${input.nodeModulesVolume}:/workspace/repository/node_modules`]
-        : []),
+      ...(input.nodeModulesVolumes ?? []).flatMap((volume) => [
+        "-v",
+        `${volume.name}:/workspace/repository/${volume.directory ? `${volume.directory}/` : ""}node_modules`,
+      ]),
 
       "-w",
-      "/workspace/repository",
+      input.workingDirectory
+        ? `/workspace/repository/${input.workingDirectory}`
+        : "/workspace/repository",
 
       ...environmentArgs,
       
@@ -190,6 +193,11 @@ export const runDockerTest = async (
         errorMessage =
           `Docker could not run the test command (${commandError.code ?? commandError.signal ?? "unknown error"}): ` +
           `${(commandError.message ?? "").slice(0, 300)}`;
+      } else if (/EAI_AGAIN|ENOTFOUND|ECONNREFUSED.*registry|getaddrinfo/i.test(stderr + stdout)) {
+        errorMessage =
+          "The test command tried to download packages, but tests run with the network disabled. " +
+          "Dependencies for this folder were not installed: set the Project folder to the directory that contains " +
+          "package.json, and make sure the command only uses locally installed tools.";
       } else if (exitCode === 125 || exitCode === 126 || exitCode === 127) {
         errorMessage =
           `Docker exited with code ${exitCode}; the command or image could not be started. ${stderr.slice(-300)}`;

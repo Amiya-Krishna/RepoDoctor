@@ -6,8 +6,10 @@ export interface DockerTestInput {
   cpuLimit?: string;
   pidsLimit?: number;
   environment?: Record<string, string>;
-  /** Docker volume holding installed node_modules, mounted over the repository's node_modules. */
-  nodeModulesVolume?: string;
+  /** Docker volumes holding installed node_modules, mounted over each package folder's node_modules. */
+  nodeModulesVolumes?: { name: string; directory: string }[];
+  /** Folder (relative to the repository root) the command runs in. Default: the root. */
+  workingDirectory?: string;
 }
 
 export interface DockerTestResult {

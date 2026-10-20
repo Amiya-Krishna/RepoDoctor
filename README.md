@@ -476,6 +476,7 @@ The reason is shown in the UI after the status. A pull request is only created f
 | No usable "test" script in package.json | The repository has no test script | Set the **Test command** field to a command the repository supports, for example `npm run lint` |
 | Dependency installation failed | Private packages, an out-of-sync lockfile, or Docker has no internet | Read the npm error in the message and fix the cause. Dependencies install with network access and scripts disabled; tests then run offline |
 | Timed out | Install or tests exceeded the limit | Raise `REPAIR_TEST_TIMEOUT_MS` (default `180000`) or `REPAIR_INSTALL_TIMEOUT_MS` (default `300000`) in `server/.env`, restart the repair worker |
+| Test command tried to download packages (`EAI_AGAIN`) | Tests run offline and the dependencies of the folder the command runs in were not installed (typical for client/server monorepos) | Set **Project folder** to the directory that contains `package.json` (for example `client`), and use a command that relies only on locally installed tools |
 | Tests failed in every attempt | The generated patch did not satisfy the tests | Use a more specific test command or a finding with clearer evidence |
 
 The progress spinner runs until a final result arrives. If it never stops, the repair worker is not running or cannot reach Redis; see the Redis section.
