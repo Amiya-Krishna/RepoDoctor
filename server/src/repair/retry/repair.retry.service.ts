@@ -314,9 +314,15 @@ export const runRepairRetryLoop = async (
           fixProposalId: proposal.id,
           dockerTestRunId: dockerTestRun.id,
           verificationResultId: verificationRecord.id,
-          summary: testResult.errorMessage
-            ? `${testResult.errorMessage} ${verification.summary}`
-            : verification.summary,
+          summary: [
+            testResult.errorMessage,
+            verification.summary,
+            verification.reasoning
+              ? `Why inconclusive: ${verification.reasoning.slice(0, 400)}`
+              : undefined,
+          ]
+            .filter(Boolean)
+            .join(" "),
         });
 
         previousTestResult = testResult;

@@ -163,7 +163,7 @@ const start = async () => {
           analysisId,
           findingId,
           status: result.status,
-          summary: result.attempts.at(-1)?.summary?.slice(0, 600),
+          summary: result.attempts.at(-1)?.summary?.slice(0, 900),
           ...(result.pullRequest ? { pullRequest: result.pullRequest } : {}),
         };
       } finally {
