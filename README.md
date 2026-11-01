@@ -6,6 +6,8 @@ RepoDoctor AI connects to a user's GitHub repositories, builds a repository snap
 
 The project is Docker-based: the supported way to run the whole stack is `docker compose up`. Docker is also what the repair worker uses to run a repository's tests in isolation.
 
+> **Privacy and security update.** AI analysis is off until each user chooses a data-processing mode (Cloud AI, Self-hosted AI, or Off) and consents; secrets are redacted before any model request; verified repairs wait for the owner's approval and are re-tested before a pull request is opened. Start with [docs/PRODUCTION_READINESS_REPORT.md](docs/PRODUCTION_READINESS_REPORT.md) (what is verified and what is not), [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and the architecture diagram in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Run the security suite with `cd server && npm test`.
+
 ## Contents
 
 [Run on port 8080](#run-on-port-8080-docker-or-powershell) · [Quick start](#quick-start-docker-compose) · [Connecting GitHub](#connecting-github-oauth) · [Deploying the frontend](#deploying-the-frontend-and-connecting-the-github-repository) · [Accounts](#registration-and-login) · [Status](#implementation-status) · [Architecture](#architecture) · [Stack](#technology-stack) · [Local development](#local-development-without-compose) · [Tests](#testing) · [Security](#security-boundaries) · [Troubleshooting](#troubleshooting) · [Limitations](#known-limitations) · [Docs](#documentation)

@@ -84,19 +84,19 @@ Do not run `prisma migrate reset` against data that must be kept. Before applyin
 | OAuth CSRF state | `github.controller.ts` | Implemented | signed JWT, 10 min, HttpOnly cookie match |
 | Webhook HMAC | `github/github-webhook.signature.ts` | Implemented | `npm run test:webhook-signature`  |
 | API rate limiting | `middleware/rate-limit.middleware.ts`, `app.ts` | Implemented (loads in `npm run test:app`) | in-memory store; set `TRUST_PROXY=1` behind a reverse proxy (Compose does) |
-| GitHub token encryption at rest | `security/token-encryption.ts` | Implemented , opt-in | AES-256-GCM; The OAuth callback stores `protectToken(token)` and the controllers/workers read with `revealToken`. Encrypts only when `GITHUB_TOKEN_ENCRYPTION_KEY` is set; legacy plaintext values still read. |
+| GitHub token encryption at rest | `security/token-encryption.ts` | Implemented, **mandatory** | AES-256-GCM. Saving a token without `GITHUB_TOKEN_ENCRYPTION_KEY` throws; production startup refuses to run without the key. Legacy plaintext values still read until `npm run tokens:migrate`. No key rotation yet. |
 | Token kept out of containers | repair worker, runner | Implemented | Docker receives only `REPO_DOCTOR_ATTEMPT` |
 | Token kept out of URLs/args | ingestion, worker, PR service | Implemented |  Via `GIT_CONFIG_*` environment |
 | Sandboxed test execution | `execution/docker.runner.ts` | Implemented | `--network none`, 512 MB, 1 CPU, 128 PIDs, `--cap-drop ALL`, `no-new-privileges`, read-only root, `noexec` tmpfs, 120 s timeout; workspace bind-mounted read-write; no `--user`; no seccomp/AppArmor profile specified |
-| Command allow-listing | `controllers/repair.controller.ts` | Partially implemented | first argv must be `node`/`npm`/`npx`/`pnpm`/`yarn`, arrays only, ≤ 20 parts; `node -e` and `npx <pkg>` are allowed. `security/test-command-policy.ts` is stricter but unused |
-| Patch validation | `repair/repair.patch.ts` | Implemented | rejects absolute, `..`, escaping paths; checks ranges and original code; no symlink check, no size/file-count cap |
+| Command allow-listing | `security/test-command-policy.ts` | Implemented | strict allowlist (`npm/pnpm test`, `run test|lint|typecheck|build`, `node [--check|--test] <file>`); `node -e`, `npx`, shells refused; enforced at the API and again in the worker |
+| Patch validation | `repair/patch-policy.ts`, `repair/repair.patch.ts` | Implemented | path escape, CI/git/credential/manifest paths, symlinks, file/size caps, secrets and dangerous constructs in added code; DELETE now verifies the text it removes |
 | Bounded retries | `retry.policy.ts` | Implemented | 3 attempts; queue-level attempts 1 |
 | Verification gate | `services/verification-gate.ts`, `pull-request.service.ts` | Implemented and verified (unit) | model verdict plus `testPassed`, no regression, confidence ≥ 0.7; since audit 2 a `VERIFIED` verdict is downgraded unless the Docker run exited 0 without timing out (`npm run test:verification-gate`) |
-| Prompt-injection handling | `rag` formatter; `security/untrusted-context.ts` | Partially implemented | retrieved memory carries a warning |
+| Prompt-injection handling | `context/context.formatter.ts`, `ai/guarded.provider.ts` | Implemented (mitigation, not a guarantee) | source and memory are nonce-delimited as untrusted data; a fixed rules preamble is added to every request; model output is untrusted and checked by the patch policy and sandbox |
 | Static secret/SAST checks | `security/static-security-scanner.ts` | Implemented  | six regex rules; not a SAST replacement |
-| Audit logging | `SecurityAuditEvent` table | Planned / not implemented | table and migration only; `security-audit.service.ts` is empty |
+| Audit logging | `audit/audit.service.ts` | Implemented | consent changes, AI egress (hash + counts, no content), webhook rejects/replays, repair queue/approval/PR, authorization denials, deletions; approvals and consent fail closed when the log cannot be written |
 | Secret redaction in memory | `rag/chunker.ts` | Implemented | regex redaction before indexing |
-| CORS | `app.ts`, `realtime/socket.ts` | Implemented | single origin from `FRONTEND_URL`; no `helmet`/security headers |
+| CORS and headers | `app.ts`, `logging/logger.ts`, `realtime/socket.ts` | Implemented | single origin from `FRONTEND_URL`; nosniff, frame-deny, no-store, CSP `default-src none`, HSTS on API responses |
 | Request size | `express.json` default | Implemented | default 100 kB body limit |
 
 ## 4. Job operations and observability
@@ -154,9 +154,11 @@ Known limitations:
 - **No TLS:** the bundled nginx serves plain HTTP. Put a TLS-terminating proxy in front for anything beyond local use.
 - **Hosted frontend:** the Compose client is for local use. For a frontend hosted from GitHub (Vercel, Netlify, ...) see the root [README](../README.md#deploying-the-frontend-and-connecting-the-github-repository).
 
-## 7. Release blockers (security and operations)
+## 7. Release blockers (status)
 
-Before any public deployment: resolve the Compose limitations above; run a clean install and build; make token encryption real (wire it in, migrate existing tokens, manage the key outside the database); enforce the Docker result independently of the model; use the stricter command policy; wire the audit service; add `trust proxy` and a shared rate-limit store if more than one API instance is used; add cross-user authorization tests; add TLS, backups, log retention, health checks and a rollback procedure.
+Closed in code: token encryption wired and mandatory; Docker result enforced independently of the model and re-run before publishing; strict command policy; audit service; replay protection; cross-user checks; startup validation; approval-gated pull requests; deletion and retention controls.
+
+Still open before a public launch (see `PRODUCTION_READINESS_REPORT.md`): run the stack end to end with a real database, Redis and Docker daemon; run the Docker-backed isolation tests on a real sandbox host; TLS in front of the client; GitHub App for fine-grained permissions; shared rate-limit store for multiple API replicas; token key rotation; external security review.
 
 ## 8. Failure triage
 

@@ -2,6 +2,90 @@
 
 **Scope:** this document describes the implemented design. Status labels are defined in [Development history §1.2](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document). Day references (for example "Day 17") point to sections of the [Day 1–30 history](DEVELOPMENT_HISTORY.md).
 
+## 0. Privacy-first, secure-by-default design (current)
+
+RepoDoctor sends no repository content to any language model until the owner of the repository has chosen a data-processing mode and consented. Every model call goes through one choke point that redacts secrets, re-scans, limits size, and records an audit event (metadata only). A verified repair never becomes a pull request on its own: the owner approves it, then the patch is re-applied to a fresh clone and the tests are run again before anything is pushed.
+
+![Architecture](architecture.svg)
+
+```mermaid
+flowchart TB
+  subgraph Browser
+    UI[React dashboard<br/>privacy · findings · diff · report · approve · activity]
+  end
+  subgraph Public["Public zone (docker compose)"]
+    NGINX[nginx client]
+    API[API + Socket.IO]
+    SCAN[scan-worker<br/>+ scheduler + retention purge]
+    PG[(PostgreSQL)]
+    RD[(Redis / BullMQ)]
+  end
+  subgraph Sandbox["Dedicated sandbox host"]
+    RW[repair-worker<br/>+ publish worker]
+    DK[[local Docker daemon]]
+    BOX[test container<br/>no network · no caps · read-only · limits]
+  end
+  GH[GitHub<br/>OAuth · webhooks · PRs]
+  LLM[Cloud LLM providers]
+  LOC[Self-hosted LLM]
+
+  UI --> NGINX --> API
+  GH -- signed webhook, replay-guarded --> API
+  API --> PG
+  API --> RD
+  RD --> SCAN
+  RD --> RW
+  SCAN --> GATE{{Privacy gate<br/>consent + redaction + audit}}
+  RW --> GATE
+  GATE -- mode CLOUD --> LLM
+  GATE -- mode LOCAL --> LOC
+  RW --> DK --> BOX
+  RW -- "approved + re-verified only" --> GH
+  SCAN --> PG
+  RW --> PG
+```
+
+### Repair lifecycle
+
+![Repair lifecycle](repair-lifecycle.svg)
+
+```mermaid
+stateDiagram-v2
+  [*] --> RUNNING: repair requested (command allow-listed, no duplicate)
+  RUNNING --> AWAITING_APPROVAL: sandbox tests exit 0 (VERIFIED)
+  RUNNING --> FAILED: tests fail / patch rejected
+  RUNNING --> INCONCLUSIVE: timeout / no evidence
+  RUNNING --> INTERRUPTED: worker crashed (recovery)
+  AWAITING_APPROVAL --> APPROVED: owner approves (audited)
+  AWAITING_APPROVAL --> REJECTED: owner rejects
+  APPROVED --> PUBLISHING: atomic claim
+  PUBLISHING --> PUBLISHED: fresh clone + patch + tests re-run pass, PR opened
+  PUBLISHING --> PUBLISH_BLOCKED: re-run fails
+  FAILED --> [*]
+  INCONCLUSIVE --> [*]
+  PUBLISHED --> [*]
+```
+
+### Where each control lives
+
+| Control | Code | Test |
+|---|---|---|
+| Consent and mode policy (default: no AI) | `privacy/privacy.policy.ts`, `privacy/privacy.service.ts` | `tests/consent.test.ts` |
+| Single AI choke point: redaction, re-scan, size limit, audit, injection preamble | `ai/guarded.provider.ts`, `ai/ai.provider.factory.ts` | `tests/consent.test.ts`, `tests/redaction.test.ts`, `tests/injection.test.ts` |
+| Secret detection / redaction / sensitive-file exclusion | `security/secret-redactor.ts` | `tests/redaction.test.ts` |
+| Untrusted repository content delimiting | `security/untrusted-context.ts`, `context/context.formatter.ts` | `tests/injection.test.ts` |
+| Mandatory token encryption, startup config checks | `security/token-encryption.ts`, `config/startup-checks.ts` | `tests/tokens-config.test.ts` |
+| Webhook signature + replay protection | `github/github-webhook.signature.ts`, `github/webhook-replay.ts`, `controllers/github-webhook.controller.ts` | `tests/webhook.test.ts` |
+| Test-command allowlist | `security/test-command-policy.ts` | `tests/patch-command.test.ts` |
+| Patch policy (paths, symlinks, size, secrets, dangerous additions) | `repair/patch-policy.ts`, `repair/repair.patch.ts` | `tests/patch-command.test.ts` |
+| Sandbox flags | `execution/docker.args.ts`, `execution/docker.runner.ts` | `tests/sandbox.test.ts` (args always; real container when Docker is available) |
+| Execution evidence gate, pre-publication re-run | `services/verification-gate.ts`, `repair/repair-guard.ts` | `tests/verification-dup.test.ts` |
+| Approval, duplicate prevention, ownership | `repair/repair-guard.ts`, `controllers/repair.controller.ts`, `services/publish-approved.service.ts` | `tests/verification-dup.test.ts` |
+| Crash recovery, scheduling, retention, deletion | `services/lifecycle.service.ts`, `services/maintenance.ts`, `workers/maintenance.scheduler.ts` | `tests/verification-dup.test.ts` (decision logic only) |
+| Audit trail | `audit/audit.service.ts` | `tests/consent.test.ts`, `tests/verification-dup.test.ts` |
+
+The sections below describe the original implementation and remain accurate except where this section says otherwise.
+
 ## 1. System goals
 
 The defensible product claim is: *RepoDoctor attempts to detect selected classes of defects in JavaScript/TypeScript repositories, proposes and applies fixes in an isolated environment, verifies them through automated tests, and creates a pull request when validation succeeds.* It never merges. Passing tests is evidence, not proof of correctness.
