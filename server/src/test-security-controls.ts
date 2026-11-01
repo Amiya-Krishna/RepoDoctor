@@ -91,7 +91,9 @@ console.log("Security control tests passed.");
   const savedKey = process.env.GITHUB_TOKEN_ENCRYPTION_KEY;
   delete process.env.GITHUB_TOKEN_ENCRYPTION_KEY;
   assert.throws(() => revealToken(stored), /GITHUB_TOKEN_ENCRYPTION_KEY/);
-  assert.equal(protectToken("gho_nokey789"), "gho_nokey789");
+  // Without a key a token is never stored in plaintext (unless explicitly opted in for development).
+  delete process.env.ALLOW_PLAINTEXT_TOKENS;
+  assert.throws(() => protectToken("gho_nokey789"), /ENCRYPTION_KEY is required/);
   process.env.GITHUB_TOKEN_ENCRYPTION_KEY = savedKey;
   console.log("Token storage helper tests passed.");
 }

@@ -1,5 +1,5 @@
 import { FixAgent } from "../../agents/fix.agent.js";
-import { createAIProvider } from "../../ai/ai.provider.factory.js";
+import { createAIProviderForRepository } from "../../privacy/privacy.service.js";
 import { saveDockerTestResult } from "../../services/docker-test-result.service.js";
 import { saveFixProposal } from "../../services/fix-proposal.service.js";
 import {
@@ -18,6 +18,8 @@ import {
 } from "../repair.workspace.js";
 
 import { applyFixResult, RepairPatchError } from "../repair.patch.js";
+import { PatchPolicyError } from "../patch-policy.js";
+import { recordAudit } from "../../audit/audit.service.js";
 
 import { runDockerTest } from "../../execution/docker.runner.js";
 import {
@@ -69,7 +71,7 @@ export const runRepairRetryLoop = async (
   onProgress?: (stage: string, message: string, percent: number) => Promise<void> | void,
   workingDirectory = "",
 ): Promise<RetryLoopResult> => {
-  const aiProvider = createAIProvider();
+  const aiProvider = await createAIProviderForRepository(repositoryId);
   const fixAgent = new FixAgent(aiProvider);
 
   const attempts: RetryAttemptResult[] = [];
@@ -228,6 +230,7 @@ export const runRepairRetryLoop = async (
         workspace.repositoryPath,
         testCommand,
         testResult,
+        analysisId,
       );
 
       /*
@@ -244,7 +247,7 @@ export const runRepairRetryLoop = async (
        * Verification receives the actual Docker result.
        */
       await onProgress?.("verification", `Verifying attempt ${attemptNumber}`, 75 + (attemptNumber - 1) * 5);
-      const verification = await verifyFix(finding, fixResult, testResult);
+      const verification = await verifyFix(finding, fixResult, testResult, aiProvider);
 
       const verificationRecord = await saveVerificationResult(
         analysisId,
@@ -390,6 +393,15 @@ export const runRepairRetryLoop = async (
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+
+      if (error instanceof PatchPolicyError) {
+        await recordAudit({
+          eventType: "PATCH_REJECTED",
+          outcome: "DENIED",
+          repositoryId,
+          details: { rule: error.rule, analysisId, findingId, attemptNumber },
+        });
+      }
 
       await updateRepairAttempt(attempt.id, {
         status: "ERROR",

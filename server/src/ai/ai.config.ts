@@ -31,12 +31,12 @@ export const isProviderConfigured = {
   gemini: () => !hasPlaceholder(aiConfig.geminiApiKey),
 };
 
-if (
-  !isProviderConfigured.openrouter() &&
-  !isProviderConfigured.groq() &&
-  !isProviderConfigured.gemini()
-) {
-  throw new Error(
-    "No AI provider is configured. Set at least one of OPENROUTER_API_KEY, GROQ_API_KEY or GEMINI_API_KEY."
-  );
-}
+export const isAnyCloudProviderConfigured = () =>
+  isProviderConfigured.openrouter() || isProviderConfigured.groq() || isProviderConfigured.gemini();
+
+export const isLocalProviderConfigured = () =>
+  /^https?:\/\//i.test(process.env.LOCAL_AI_BASE_URL ?? "") && Boolean(process.env.LOCAL_AI_MODEL);
+
+// Importing this module no longer throws when no provider is configured:
+// the API must be able to start (and tell the user what to configure).
+// Egress is refused per request by the privacy policy instead (fail closed).

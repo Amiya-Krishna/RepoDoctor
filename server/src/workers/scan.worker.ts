@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { Worker } from "bullmq";
+import { Worker, UnrecoverableError } from "bullmq";
 import { connectDatabase, disconnectDatabase, prisma } from "../config/prisma.js";
 import {
   SCAN_QUEUE_NAME,
@@ -10,9 +10,33 @@ import {
 } from "../queue/scan.queue.js";
 import { ingestRepository } from "../services/ingestion.service.js";
 import { revealToken } from "../security/token-encryption.js";
+import { assertSecureConfiguration } from "../config/startup-checks.js";
+import { startMaintenanceScheduler } from "./maintenance.scheduler.js";
+import { notifyUser } from "../services/notification.service.js";
+import { PrivacyPolicyError } from "../privacy/privacy.policy.js";
+
+async function notifyScanResult(userId: string, repositoryId: string, analysisId: string) {
+  const [bug, sec, prefs] = await Promise.all([
+    prisma.bugFinding.count({ where: { analysisId, severity: "CRITICAL" } }),
+    prisma.securityFinding.count({ where: { analysisId, severity: "CRITICAL" } }),
+    prisma.privacySettings.findUnique({ where: { userId }, select: { notifyOnCritical: true } }),
+  ]);
+  const critical = bug + sec;
+  if (critical > 0 && (prefs?.notifyOnCritical ?? true)) {
+    await notifyUser({
+      userId, type: "CRITICAL_FINDING", severity: "CRITICAL", repositoryId,
+      title: `${critical} critical finding${critical === 1 ? "" : "s"}`,
+      message: "The latest scan found critical issues. Open the repository to review them and start a verified repair.",
+    });
+  } else {
+    await notifyUser({ userId, type: "SCAN_COMPLETED", repositoryId, title: "Scan completed", message: "Your repository scan finished. Open it to review findings." });
+  }
+}
 
 const start = async () => {
+  assertSecureConfiguration("scan-worker");
   await connectDatabase();
+  const stopScheduler = startMaintenanceScheduler();
 
   const worker = new Worker<RepositoryScanJobData, RepositoryScanResult>(
     SCAN_QUEUE_NAME,
@@ -72,6 +96,7 @@ const start = async () => {
         });
 
         await progress("completed", "Repository analysis completed", 100);
+        await notifyScanResult(userId, repositoryId, result.analysisId);
 
         return {
           repositoryId,
@@ -80,6 +105,17 @@ const start = async () => {
           trigger,
         };
       } catch (error) {
+        // A privacy block is deterministic: retrying cannot fix it, so stop retrying
+        // and tell the user exactly what to change.
+        if (error instanceof PrivacyPolicyError) {
+          await prisma.analysis.updateMany({ where: { id: analysisId, repositoryId }, data: { status: "FAILED", completedAt: new Date() } });
+          await notifyUser({
+            userId, type: "PRIVACY_BLOCKED", severity: "WARNING", repositoryId,
+            title: "Analysis not started: privacy settings",
+            message: `${error.message} ${error.recovery}`,
+          });
+          throw new UnrecoverableError(`${error.message} ${error.recovery}`);
+        }
         const maxAttempts = job.opts.attempts ?? 1;
         if (analysisId && job.attemptsMade + 1 >= maxAttempts) {
           await prisma.analysis.updateMany({
@@ -108,6 +144,7 @@ const start = async () => {
   });
 
   const shutdown = async () => {
+    stopScheduler();
     await worker.close();
     await closeScanQueue();
     await disconnectDatabase();

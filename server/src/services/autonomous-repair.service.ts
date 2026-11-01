@@ -1,11 +1,7 @@
 import {
   runRepairRetryLoop,
-  type VerifiedRepairPublisher,
 } from "../repair/retry/repair.retry.service.js";
-import {
-  publishVerifiedRepairWithCleanup,
-  type RepairPublicationConfig,
-} from "./pull-request.service.js";
+import type { RepairPublicationConfig } from "./pull-request.service.js";
 
 import {
   createRepairJob,
@@ -106,32 +102,13 @@ export const runAutonomousRepair = async (
     await createRepairJob(
       input.analysisId,
       input.findingId,
+      { testCommand: input.testCommand, workingDirectory },
     );
 
   try {
-    const publication = input.publication;
-    const onVerified: VerifiedRepairPublisher | undefined = publication
-      ? async (context) => {
-          const saved = await publishVerifiedRepairWithCleanup(
-            context.workspace,
-            context.verification,
-            context.findingTitle,
-            context.verificationResultId,
-            context.analysisId,
-            context.findingId,
-            context.fixProposalId,
-            publication,
-          );
-
-          return {
-            number: saved.pullRequestNumber,
-            url: saved.pullRequestUrl,
-            branchName: saved.branchName,
-            commitSha: saved.commitSha,
-          };
-        }
-      : undefined;
-
+    // Publication is deliberately NOT wired here: a verified repair stops at
+    // AWAITING_APPROVAL and a pull request is created only after the owner
+    // approves it (see publish-approved.service.ts).
     const result =
       await runRepairRetryLoop(
         input.analysisId,
@@ -140,7 +117,7 @@ export const runAutonomousRepair = async (
         input.finding,
         input.sourceRepositoryPath,
         input.testCommand,
-        onVerified,
+        undefined,
         input.onProgress,
         workingDirectory,
       );
@@ -164,11 +141,19 @@ export const runAutonomousRepair = async (
       });
     }
 
+    const winning = result.status === "VERIFIED"
+      ? result.attempts.find((a) => a.attemptNumber === result.successfulAttempt)
+      : undefined;
+    const awaitingApproval = Boolean(winning?.fixProposalId && winning?.verificationResultId);
+
     await updateRepairJob(
       repairJob.id,
       {
-        status: result.status,
+        status: awaitingApproval ? "AWAITING_APPROVAL" : result.status,
         currentAttempt,
+        ...(awaitingApproval
+          ? { fixProposalId: winning!.fixProposalId, verificationResultId: winning!.verificationResultId }
+          : {}),
       },
     );
 

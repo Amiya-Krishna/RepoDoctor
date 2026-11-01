@@ -12,7 +12,7 @@ import { BugDetectionAgent } from "../agents/bug-detection.agent.js";
 import { SecurityAgent } from "../agents/security.agent.js";
 import { TestGenerationAgent } from "../agents/test-generation.agent.js";
 
-import { createAIProvider } from "../ai/ai.provider.factory.js";
+import { createAIProviderForRepository } from "../privacy/privacy.service.js";
 
 import {
   saveBugFindings,
@@ -133,8 +133,10 @@ export const runAnalysisPipeline = async (
     // STAGE 2: CREATE AI PROVIDER
     // ========================================
 
+    // Fails closed (PrivacyPolicyError) unless the owner chose a data mode and
+    // consented. All prompts pass through redaction inside this provider.
     const aiProvider =
-      createAIProvider();
+      await createAIProviderForRepository(repositoryId);
 
     // ========================================
     // STAGE 3: BUG DETECTION

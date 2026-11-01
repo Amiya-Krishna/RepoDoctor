@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { envPositiveInt } from "../config/env-number.js";
+import { buildSandboxRunArgs } from "./docker.args.js";
 
 import type {
   DockerTestInput,
@@ -13,8 +14,8 @@ import type {
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_TIMEOUT_MS = envPositiveInt("REPAIR_TEST_TIMEOUT_MS", 180_000);
-const DEFAULT_MEMORY_LIMIT = process.env.REPAIR_TEST_MEMORY ?? "1g";
-const DEFAULT_CPU_LIMIT = process.env.REPAIR_TEST_CPUS ?? "2";
+const DEFAULT_MEMORY_LIMIT = process.env.REPAIR_TEST_MEMORY ?? "512m";
+const DEFAULT_CPU_LIMIT = process.env.REPAIR_TEST_CPUS ?? "1";
 const DEFAULT_PIDS_LIMIT = 128;
 
 const MAX_OUTPUT_SIZE = 1_000_000;
@@ -52,24 +53,6 @@ export const runDockerTest = async (
     input.pidsLimit ??
     DEFAULT_PIDS_LIMIT;
 
-  // Defaults make npm/node tooling work on the read-only root filesystem and
-  // stop test runners from entering watch mode (which would hang until timeout).
-  const environmentArgs = Object.entries({
-      HOME: "/tmp",
-      npm_config_cache: "/tmp/.npm",
-      CI: "true",
-      ...(input.environment ?? {}),
-    }).flatMap(([key, value]) => [
-      "-e",
-      `${key}=${value}`,
-    ]);
-
-  if (input.testCommand.length === 0) {
-    throw new Error(
-      "Docker test command cannot be empty.",
-    );
-  }
-
   const containerName =
     `repodoctor-test-${randomUUID()}`;
 
@@ -82,59 +65,16 @@ export const runDockerTest = async (
   let errorMessage: string | undefined;
 
   try {
-    const dockerArgs = [
-      "run",
-
-      "--rm",
-
-      "--name",
+    const dockerArgs = buildSandboxRunArgs(
+      { ...input, repositoryPath },
       containerName,
-
-      "--network",
-      "none",
-
-      "--memory",
-      memoryLimit,
-
-      "--cpus",
-      cpuLimit,
-
-      "--pids-limit",
-      String(pidsLimit),
-
-      "--cap-drop",
-      "ALL",
-
-      "--security-opt",
-      "no-new-privileges",
-
-      "--read-only",
-
-      "--tmpfs",
-      "/tmp:rw,noexec,nosuid,size=256m",
-
-      "--tmpfs",
-      "/run:rw,noexec,nosuid,size=64m",
-
-      "-v",
-      `${repositoryPath}:/workspace/repository:rw`,
-
-      ...(input.nodeModulesVolumes ?? []).flatMap((volume) => [
-        "-v",
-        `${volume.name}:/workspace/repository/${volume.directory ? `${volume.directory}/` : ""}node_modules`,
-      ]),
-
-      "-w",
-      input.workingDirectory
-        ? `/workspace/repository/${input.workingDirectory}`
-        : "/workspace/repository",
-
-      ...environmentArgs,
-      
-      "node:22-bookworm-slim",
-
-      ...input.testCommand,
-    ];
+      {
+        memory: memoryLimit,
+        cpus: cpuLimit,
+        pids: pidsLimit,
+        user: process.env.REPAIR_SANDBOX_USER ?? "1000:1000",
+      },
+    );
 
     try {
       const result =

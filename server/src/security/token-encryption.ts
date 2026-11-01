@@ -74,32 +74,51 @@ export function isEncryptionConfigured(): boolean {
 }
 
 /**
- * Value to persist for a GitHub access token. Encrypted when
- * GITHUB_TOKEN_ENCRYPTION_KEY is configured; otherwise stored as-is (with a
- * one-time warning) so existing development setups keep working.
+ * Plaintext token storage is allowed only for local development and only when
+ * explicitly requested. Anywhere else a missing key is a hard error: a token
+ * is never silently stored unencrypted.
+ */
+function plaintextAllowed(): boolean {
+  return process.env.NODE_ENV !== "production" && process.env.ALLOW_PLAINTEXT_TOKENS === "true";
+}
+
+/**
+ * Value to persist for a GitHub access token (AES-256-GCM). Throws when
+ * GITHUB_TOKEN_ENCRYPTION_KEY is missing unless ALLOW_PLAINTEXT_TOKENS=true in
+ * a non-production environment.
  */
 export function protectToken(token: string): string {
   if (isEncryptionConfigured()) {
     return encryptToken(token);
   }
 
+  if (!plaintextAllowed()) {
+    throw new Error(
+      "GITHUB_TOKEN_ENCRYPTION_KEY is required to store GitHub tokens. Generate one with: " +
+        "node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"",
+    );
+  }
+
   if (!warnedPlaintext) {
     warnedPlaintext = true;
-    console.warn(
-      "GITHUB_TOKEN_ENCRYPTION_KEY is not set: GitHub access tokens are stored unencrypted.",
-    );
+    console.warn("ALLOW_PLAINTEXT_TOKENS=true: GitHub tokens are stored UNENCRYPTED (development only).");
   }
 
   return token;
 }
 
+export function isEncryptedPayload(stored: string): boolean {
+  return stored.split(".").length === 3;
+}
+
 /**
  * Inverse of protectToken. GitHub tokens never contain "." so a value with
- * three dot-separated parts is an encrypted payload; anything else is a legacy
- * plaintext token and is returned unchanged.
+ * three dot-separated parts is an encrypted payload. A legacy plaintext value
+ * is still readable (so existing users keep working) but is re-encrypted by
+ * `npm run tokens:migrate`; it is never written back as plaintext.
  */
 export function revealToken(stored: string): string {
-  if (stored.split(".").length !== 3) {
+  if (!isEncryptedPayload(stored)) {
     return stored;
   }
 

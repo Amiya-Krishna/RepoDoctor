@@ -6,6 +6,7 @@ import {
   generateToken,
   hashPassword,
 } from "../services/auth.service.js";
+import { recordAudit } from "../audit/audit.service.js";
 
 export const register = async (req: Request, res: Response) => {
   try {
@@ -103,6 +104,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     const user = await prisma.user.findUnique({ where: { email } });
 
     if (!user) {
+      await recordAudit({ eventType: "AUTH_LOGIN_FAILED", outcome: "DENIED", details: { reason: "unknown-account" } });
       res.status(401).json({
         message: "Invalid email or password",
       });
@@ -112,6 +114,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     const isPasswordValid = await comparePassword(password, user.password);
 
     if (!isPasswordValid) {
+      await recordAudit({ eventType: "AUTH_LOGIN_FAILED", outcome: "DENIED", actorId: user.id, details: { reason: "bad-password" } });
       res.status(401).json({
         message: "Invalid email or password",
       });

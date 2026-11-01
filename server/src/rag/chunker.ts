@@ -4,21 +4,8 @@ export interface TextChunk {
   content: string;
 }
 
-export function redactSecrets(text: string): string {
-  return text
-    .replace(
-      /((?:api[_-]?key|access[_-]?token|password|client[_-]?secret|secret[_-]?key)\s*[:=]\s*["']?)[^"' \r\n,}]+/gi,
-      "$1[REDACTED]",
-    )
-    .replace(
-      /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g,
-      "[REDACTED_GITHUB_TOKEN]",
-    )
-    .replace(
-      /\bsk-[A-Za-z0-9_-]{20,}\b/g,
-      "[REDACTED_API_KEY]",
-    );
-}
+export { redactSecrets } from "../security/secret-redactor.js";
+import { redactSecrets } from "../security/secret-redactor.js";
 
 export function chunkText(
   input: string,

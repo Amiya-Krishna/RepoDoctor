@@ -6,9 +6,7 @@ import {
   formatRepositoryContext,
 } from "./context/context.formatter.js";
 
-import {
-  createAIProvider,
-} from "./ai/ai.provider.factory.js";
+import { createManualTestProvider as createAIProvider } from "./ai/manual-test.provider.js";
 
 import {
   FixAgent,

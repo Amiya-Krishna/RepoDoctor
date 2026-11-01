@@ -1,4 +1,4 @@
-import { createAIProvider } from "./ai/ai.provider.factory.js";
+import { createManualTestProvider as createAIProvider } from "./ai/manual-test.provider.js";
  
 import { BugDetectionAgent } from "./agents/bug-detection.agent.js"; 
  

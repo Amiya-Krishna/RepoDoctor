@@ -5,6 +5,8 @@ import { connectDatabase, disconnectDatabase } from "./config/prisma.js";
 import { initRealtime, closeRealtime } from "./realtime/socket.js";
 import { closeScanQueue } from "./queue/scan.queue.js";
 import { closeRepairQueue } from "./queue/repair.queue.js";
+import { assertSecureConfiguration } from "./config/startup-checks.js";
+import { log } from "./logging/logger.js";
 
 const PORT = Number(process.env.PORT ?? 4000);
 
@@ -12,6 +14,8 @@ const startServer = async () => {
   if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET must be configured");
   }
+  // In production this refuses to start on missing encryption key, weak secrets, http origin, etc.
+  assertSecureConfiguration("api");
 
   await connectDatabase();
 
@@ -20,7 +24,7 @@ const startServer = async () => {
   try {
     await initRealtime(httpServer);
     httpServer.listen(PORT, () => {
-      console.log(`RepoDoctor API and realtime server listening on port ${PORT}`);
+      log("info", "server_listening", { port: PORT });
     });
   } catch (error) {
     await closeRealtime().catch(() => undefined);
@@ -48,7 +52,11 @@ const startServer = async () => {
   process.once("SIGTERM", shutdown);
 };
 
+process.on("unhandledRejection", (reason) => {
+  log("error", "unhandled_rejection", { reason: reason instanceof Error ? reason.message : String(reason) });
+});
+
 startServer().catch((error) => {
-  console.error("Failed to start server:", error);
+  log("error", "startup_failed", { reason: error instanceof Error ? error.message : String(error) });
   process.exit(1);
 });

@@ -11,6 +11,7 @@ import {
   getGitHubUser,
 } from "../services/github.service.js";
 import { saveRepository } from "../services/repository.service.js";
+import { recordAudit } from "../audit/audit.service.js";
 
 export const connectGitHub = async (req: Request, res: Response) => {
   try {
@@ -40,7 +41,8 @@ export const connectGitHub = async (req: Request, res: Response) => {
       maxAge: 10 * 60 * 1000,
     });
 
-    return res.json({ authUrl: getGitHubAuthUrl(state) });
+    const access = req.query.access === "private" ? "private" : "public";
+    return res.json({ authUrl: getGitHubAuthUrl(state, access), access });
   } catch (error) {
     console.error("GitHub connect error:", describeError(error));
     return res.status(500).json({ message: "Failed to create GitHub authorization URL" });
@@ -107,6 +109,7 @@ export const githubCallback = async (req: Request, res: Response) => {
     });
 
     clearStateCookie();
+    await recordAudit({ eventType: "GITHUB_CONNECTED", outcome: "SUCCESS", actorId: userId });
     const frontendUrl = process.env.FRONTEND_URL ?? "http://localhost:8080";
     return res.redirect(frontendUrl);
   } catch (error: any) {

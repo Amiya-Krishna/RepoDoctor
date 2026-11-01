@@ -1,4 +1,6 @@
 import type { RepositoryContext } from "./context.types.js";
+import { wrapUntrustedContext } from "../security/untrusted-context.js";
+import { isSensitiveFilePath } from "../security/secret-redactor.js";
 
 export const formatRepositoryContext = (
   context: RepositoryContext
@@ -41,8 +43,12 @@ export const formatRepositoryContext = (
 
   sections.push("\nSOURCE FILE CONTENT:\n");
 
+  // Repository content is attacker-controllable. It goes inside a nonce-delimited
+  // block that tells the model it is data, and sensitive files are never included.
+  const blocks: string[] = [];
   for (const file of context.files) {
-    sections.push(
+    if (isSensitiveFilePath(file.path)) continue;
+    blocks.push(
       [
         `--- FILE: ${file.path} ---`,
         `Language: ${file.language}`,
@@ -52,6 +58,7 @@ export const formatRepositoryContext = (
       ].join("\n")
     );
   }
+  sections.push(wrapUntrustedContext("repository source files", blocks.join("\n")));
 
   return sections.join("\n");
 };

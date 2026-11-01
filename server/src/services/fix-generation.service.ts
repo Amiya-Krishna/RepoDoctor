@@ -1,4 +1,4 @@
-import { createAIProvider } from "../ai/ai.provider.factory.js";
+import type { AIProvider } from "../ai/ai.provider.js";
 
 import { FixAgent } from "../agents/fix.agent.js";
 
@@ -14,11 +14,9 @@ type SupportedFinding =
 export const generateFix = async (
   finding: SupportedFinding,
   context: RepositoryContext,
-  formattedContext: string
+  formattedContext: string,
+  aiProvider: AIProvider,
 ): Promise<FixResult> => {
-  const aiProvider =
-    createAIProvider();
-
   const agent =
     new FixAgent(aiProvider);
 

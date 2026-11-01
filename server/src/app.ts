@@ -4,12 +4,18 @@ import authRoutes from "./routes/auth.routes.js";
 import githubRoutes from "./routes/github.routes.js";
 import repositoryRoutes from "./routes/repository.routes.js";
 import repairRoutes from "./routes/repair.routes.js";
+import privacyRoutes from "./routes/privacy.routes.js";
+import { requestLogger, securityHeaders } from "./logging/logger.js";
+import { readinessHandler } from "./health.js";
 import {
   apiRateLimiter,
   authRateLimiter,
 } from "./middleware/rate-limit.middleware.js";
 
 const app = express();
+app.disable("x-powered-by");
+app.use(securityHeaders);
+app.use(requestLogger);
 
 // Behind a reverse proxy (e.g. the bundled nginx) every client would otherwise
 // share the proxy's IP in rate limiting. Opt in with TRUST_PROXY=<hop count>.
@@ -45,6 +51,8 @@ app.use(express.json({
   },
 }));
 
+app.get("/api/ready", readinessHandler);
+
 app.get("/api/health", (_req, res) => {
   res.status(200).json({
     success: true,
@@ -57,5 +65,6 @@ app.use("/api/auth", authRateLimiter, authRoutes);
 app.use("/api/github", githubRoutes);
 app.use("/api/repositories", repositoryRoutes);
 app.use("/api/repairs", repairRoutes);
+app.use("/api/privacy", privacyRoutes);
 
 export default app;

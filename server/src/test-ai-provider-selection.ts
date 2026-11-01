@@ -32,7 +32,7 @@ const run = async (env: Record<string, string>, code: string) => {
 
 const listProviders = `
   const { createAIProvider } = await import("./src/ai/ai.provider.factory.js");
-  const manager = createAIProvider();
+  const manager = createAIProvider({ mode: "CLOUD", onEgress: () => undefined }).inner;
   console.log(JSON.stringify(manager.providers.map((p) => p.constructor.name)));
 `;
 
@@ -58,13 +58,15 @@ result = await run({ GROQ_API_KEY: "...", GEMINI_API_KEY: "real-gemini-key" }, l
 assert.ok(result.ok, result.out);
 assert.deepEqual(JSON.parse(result.out), ["GeminiProvider"]);
 
-// No usable key: a clear configuration error.
+// No usable key: importing the config no longer crashes the API; building a
+// provider fails with a clear error and the privacy policy reports
+// CLOUD_AI_NOT_CONFIGURED before any request is attempted.
 result = await run({}, listProviders);
 assert.equal(result.ok, false);
-assert.match(result.out, /No AI provider is configured/);
+assert.match(result.out, /No AI providers configured/);
 result = await run({ OPENROUTER_API_KEY: "...", GROQ_API_KEY: "  " }, listProviders);
 assert.equal(result.ok, false);
-assert.match(result.out, /No AI provider is configured/);
+assert.match(result.out, /No AI providers configured/);
 
 // Empty *_MODEL values (as in .env.example) fall back to the defaults.
 result = await run(

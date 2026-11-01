@@ -10,6 +10,8 @@ import type {
   AppliedRepairChange,
 } from "./repair.types.js";
 
+import { assertNoSymlinkInPath, validatePatchPolicy } from "./patch-policy.js";
+
 const assertSafeRelativePath = (
   filePath: string,
 ): void => {
@@ -138,7 +140,9 @@ const resolveOriginalCode = (
   lines: string[],
   change: FixChange,
 ): FixChange => {
-  if (change.changeType !== "REPLACE") {
+  // INSERT adds lines and has nothing to compare; REPLACE and DELETE remove
+  // existing lines, so the text being removed must match what the model claims.
+  if (change.changeType !== "REPLACE" && change.changeType !== "DELETE") {
     return change;
   }
 
@@ -232,6 +236,9 @@ export const applyFixResult = async (
     );
   }
 
+  // Static policy first: nothing touches the workspace if the patch is not acceptable.
+  validatePatchPolicy(fixResult);
+
   const groupedChanges = new Map<
     string,
     FixChange[]
@@ -275,6 +282,8 @@ export const applyFixResult = async (
         `Repair path escapes workspace: ${filePath}`,
       );
     }
+
+    await assertNoSymlinkInPath(repositoryPath, filePath);
 
     const content = await fs.readFile(
       absolutePath,

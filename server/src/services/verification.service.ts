@@ -1,6 +1,4 @@
-import {
-  createAIProvider,
-} from "../ai/ai.provider.factory.js";
+import type { AIProvider } from "../ai/ai.provider.js";
 
 import {
   VerificationAgent,
@@ -36,10 +34,8 @@ export const verifyFix = async (
   finding: VerificationFinding,
   fixResult: FixResult,
   testResult: DockerTestResult,
+  aiProvider: AIProvider,
 ): Promise<VerificationResult> => {
-  const aiProvider =
-    createAIProvider();
-
   const agent =
     new VerificationAgent(
       aiProvider,

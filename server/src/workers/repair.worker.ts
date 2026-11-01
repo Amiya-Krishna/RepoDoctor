@@ -2,9 +2,12 @@ import "dotenv/config";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
-import { Worker } from "bullmq";
+import { Worker, UnrecoverableError } from "bullmq";
 import { connectDatabase, disconnectDatabase, prisma } from "../config/prisma.js";
 import {
+  PUBLISH_QUEUE_NAME,
+  publishQueue,
+  queuePublish,
   REPAIR_QUEUE_NAME,
   repairQueue,
   type AutonomousRepairJobData,
@@ -14,6 +17,15 @@ import { redisConnection, closeScanQueue } from "../queue/scan.queue.js";
 import { createWorkspace, removeWorkspace } from "../services/workspace.service.js";
 import { revealToken } from "../security/token-encryption.js";
 import { runAutonomousRepair } from "../services/autonomous-repair.service.js";
+import { assertSecureConfiguration } from "../config/startup-checks.js";
+import { publishApprovedRepair } from "../services/publish-approved.service.js";
+import { recoverStaleRepairJobs } from "../services/lifecycle.service.js";
+import { notifyUser } from "../services/notification.service.js";
+import { recordAudit } from "../audit/audit.service.js";
+import { validateTestCommand } from "../security/test-command-policy.js";
+
+import { gitAuthEnvironment } from "../github/git-env.js";
+import { PrivacyPolicyError } from "../privacy/privacy.policy.js";
 import type { BugFinding, BugCategory, BugSeverity } from "../agents/bug-detection.types.js";
 import type { SecurityFinding, SecurityCategory, SecuritySeverity } from "../agents/security.types.js";
 
@@ -25,14 +37,6 @@ const securityCategories = new Set([
   "COMMAND_EXECUTION", "DATA_EXPOSURE", "INSECURE_CONFIGURATION", "DEPENDENCY", "OTHER",
 ]);
 const severities = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
-
-const cloneEnvironment = (token: string): NodeJS.ProcessEnv => ({
-  ...process.env,
-  GIT_TERMINAL_PROMPT: "0",
-  GIT_CONFIG_COUNT: "1",
-  GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
-  GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`,
-});
 
 async function loadFinding(analysisId: string, findingId: string) {
   const bug = await prisma.bugFinding.findFirst({ where: { id: findingId, analysisId } });
@@ -76,8 +80,42 @@ async function loadFinding(analysisId: string, findingId: string) {
   return finding;
 }
 
+async function announceOutcome(userId: string, repositoryId: string, status: string) {
+  if (status === "VERIFIED") {
+    await recordAudit({ eventType: "REPAIR_VERIFIED", outcome: "SUCCESS", actorId: userId, repositoryId });
+    await notifyUser({
+      userId, type: "REPAIR_VERIFIED", repositoryId,
+      title: "A verified fix is ready for your approval",
+      message: "The patch passed the tests in an isolated sandbox. Review the diff and the test evidence, then approve to open a pull request.",
+    });
+  } else {
+    await recordAudit({ eventType: "REPAIR_NOT_VERIFIED", outcome: "DENIED", actorId: userId, repositoryId, details: { status } });
+    await notifyUser({
+      userId,
+      type: status === "INCONCLUSIVE" ? "REPAIR_INCONCLUSIVE" : "REPAIR_FAILED",
+      severity: "WARNING", repositoryId,
+      title: status === "INCONCLUSIVE" ? "Repair was inconclusive" : "Repair could not be verified",
+      message: "No pull request was created. Open the repair report for the test output and suggested next steps (for example a different test command or project folder).",
+    });
+  }
+}
+
 const start = async () => {
+  assertSecureConfiguration("repair-worker");
   await connectDatabase();
+
+  // Resume what a previous worker left behind: mark orphaned jobs (the user is told)
+  // and re-enqueue approvals whose queue message was lost.
+  const recover = async () => {
+    try {
+      const r = await recoverStaleRepairJobs(queuePublish);
+      if (r.interrupted || r.requeued) console.log("repair job recovery", r);
+    } catch (error) {
+      console.error("repair job recovery failed", error instanceof Error ? error.name : "unknown");
+    }
+  };
+  await recover();
+  const recoveryTimer = setInterval(recover, 5 * 60_000);
 
   const worker = new Worker<AutonomousRepairJobData, AutonomousRepairJobResult>(
     REPAIR_QUEUE_NAME,
@@ -116,6 +154,13 @@ const start = async () => {
       if (!user?.githubAccessToken) throw new Error("GitHub connection is missing or expired");
       const githubAccessToken = revealToken(user.githubAccessToken);
 
+      // Defence in depth: the API validated this, but the queue is also an input.
+      const command = validateTestCommand(testCommand);
+      if (!command.ok) {
+        await recordAudit({ eventType: "REPAIR_REJECTED", outcome: "DENIED", actorId: userId, repositoryId, details: { reason: command.reason } });
+        throw new UnrecoverableError(`Test command rejected: ${command.reason}`);
+      }
+
       const finding = await loadFinding(analysisId, findingId);
       const sourceWorkspace = await createWorkspace();
 
@@ -134,7 +179,7 @@ const start = async () => {
             sourceRepositoryPath,
           ],
           {
-            env: cloneEnvironment(githubAccessToken),
+            env: gitAuthEnvironment(githubAccessToken),
             timeout: 120_000,
             maxBuffer: 10 * 1024 * 1024,
           },
@@ -148,16 +193,12 @@ const start = async () => {
           findingId,
           finding,
           sourceRepositoryPath,
-          testCommand,
+          testCommand: command.argv,
           workingDirectory,
-          publication: {
-            owner: analysis.repository.ownerLogin,
-            repo: analysis.repository.name,
-            token: githubAccessToken,
-            baseBranch: analysis.repository.defaultBranch,
-          },
           onProgress: progress,
         });
+
+        await announceOutcome(userId, repositoryId, result.status);
 
         return {
           repairJobId: result.repairJobId,
@@ -165,7 +206,6 @@ const start = async () => {
           findingId,
           status: result.status,
           summary: result.attempts.at(-1)?.summary?.slice(0, 900),
-          ...(result.pullRequest ? { pullRequest: result.pullRequest } : {}),
         };
       } finally {
         await removeWorkspace(sourceWorkspace.path);
@@ -177,7 +217,24 @@ const start = async () => {
     },
   );
 
-  worker.on("failed", (job, error) => {
+  const publishWorker = new Worker(
+    PUBLISH_QUEUE_NAME,
+    async (job) => {
+      const outcome = await publishApprovedRepair({ repairJobId: job.data.repairJobId, userId: job.data.userId });
+      return outcome.status === "PUBLISHED" || outcome.status === "ALREADY_PUBLISHED"
+        ? { status: outcome.status, pullRequestUrl: outcome.pullRequestUrl }
+        : { status: outcome.status };
+    },
+    { connection: redisConnection, concurrency: 1 },
+  );
+  publishWorker.on("failed", (job, error) => {
+    console.error("Publish job failed", { jobId: job?.id, message: error.message });
+  });
+
+  worker.on("failed", async (job, error) => {
+    if (job && error instanceof PrivacyPolicyError) {
+      await notifyUser({ userId: job.data.userId, type: "PRIVACY_BLOCKED", severity: "WARNING", title: "Repair not started: privacy settings", message: `${error.message} ${error.recovery}`.slice(0, 600) });
+    }
     console.error("Autonomous repair queue job failed", {
       jobId: job?.id,
       message: error.message,
@@ -186,7 +243,9 @@ const start = async () => {
   worker.on("error", (error) => console.error("Autonomous repair worker error", error.message));
 
   const shutdown = async () => {
+    clearInterval(recoveryTimer);
     await worker.close();
+    await publishWorker.close();
     await repairQueue.close();
     await closeScanQueue();
     await disconnectDatabase();

@@ -14,8 +14,9 @@ interface SaveRepositoryInput {
 
 export const saveRepository = async (data: SaveRepositoryInput) => {
   return prisma.repository.upsert({
+    // A GitHub repository can be connected by several users; each user gets an isolated row.
     where: {
-      githubId: data.githubId,
+      userId_githubId: { userId: data.userId, githubId: data.githubId },
     },
     update: {
       name: data.name,

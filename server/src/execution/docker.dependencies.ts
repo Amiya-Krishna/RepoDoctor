@@ -197,7 +197,10 @@ export const installDependencies = async (
         "docker",
         [
           "run", "--rm",
+          "--ipc", "none",
+          "--label", "repodoctor.sandbox=install",
           "--memory", "1g",
+          "--memory-swap", "1g",
           "--cpus", "2",
           "--pids-limit", "512",
           "--cap-drop", "ALL",

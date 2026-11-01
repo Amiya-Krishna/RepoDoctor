@@ -18,13 +18,15 @@ model User {
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
   repositories      Repository[]
+  privacySettings   PrivacySettings?
+  notifications     Notification[]
 
   @@map("users")
 }
 
 model Repository {
   id            String                  @id @default(cuid())
-  githubId      String                  @unique
+  githubId      String
   name          String
   fullName      String
   ownerLogin    String
@@ -33,12 +35,16 @@ model Repository {
   htmlUrl       String
   cloneUrl      String
   userId        String
+  autoScan      Boolean                 @default(false)
+  lastScheduledScanAt DateTime?
   createdAt     DateTime                @default(now())
   updatedAt     DateTime                @updatedAt
   analyses      Analysis[]
   user          User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   memoryChunks  RepositoryMemoryChunk[]
 
+  @@unique([userId, githubId])
+  @@index([githubId])
   @@index([userId])
 }
 
@@ -257,6 +263,8 @@ model VerificationResult {
 model DockerTestRun {
   id String @id @default(cuid())
 
+  analysisId String?
+
   repositoryPath String
 
   testCommand Json
@@ -273,6 +281,7 @@ model DockerTestRun {
 
   @@index([success])
   @@index([timedOut])
+  @@index([analysisId])
 }
 
 model RepairAttempt {
@@ -325,6 +334,7 @@ model PullRequest {
 
   createdAt DateTime @default(now())
 
+  @@unique([analysisId, findingId])
   @@index([analysisId])
   @@index([findingId])
   @@index([fixProposalId])
@@ -346,9 +356,18 @@ model RepairJob {
 
   errorMessage String?
 
+  // Approval gate: a VERIFIED repair waits here until the owner approves it.
+  fixProposalId        String?
+  verificationResultId String?
+  testCommand          Json?
+  workingDirectory     String?
+  approvedAt           DateTime?
+  approvedBy           String?
+  pullRequestUrl       String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  analysis  Analysis @relation(fields: [analysisId], references: [id])
+  analysis  Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
 
   @@index([analysisId])
   @@index([findingId])
@@ -401,4 +420,43 @@ model SecurityAuditEvent {
   @@index([eventType, createdAt])
   @@index([repositoryId, createdAt])
   @@index([repairJobId, createdAt])
+}
+
+model PrivacySettings {
+  userId String @id
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // NONE = no code leaves the server (safest default); CLOUD = hosted LLM
+  // providers after informed consent; LOCAL = self-hosted OpenAI-compatible endpoint.
+  dataMode       String    @default("NONE")
+  consentVersion Int?
+  consentedAt    DateTime?
+  retentionDays  Int       @default(30)
+  notifyOnCritical Boolean @default(true)
+
+  updatedAt DateTime @updatedAt
+}
+
+model WebhookDelivery {
+  deliveryId String   @id
+  event      String
+  receivedAt DateTime @default(now())
+
+  @@index([receivedAt])
+}
+
+model Notification {
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type         String
+  severity     String    @default("INFO")
+  title        String
+  message      String
+  repositoryId String?
+  readAt       DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
 }

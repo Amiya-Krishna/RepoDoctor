@@ -6,7 +6,7 @@ export const SCAN_QUEUE_NAME = "repository-scan";
 export interface RepositoryScanJobData {
   repositoryId: string;
   userId: string;
-  trigger: "manual" | "github-webhook";
+  trigger: "manual" | "github-webhook" | "scheduled";
   ref?: string;
   deliveryId?: string;
   analysisId?: string;
