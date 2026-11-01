@@ -14,9 +14,13 @@
 #   GITHUB_CALLBACK_URL=http://localhost:8080/api/github/callback
 # (the API listens on 4000 inside the network; only the client's 8080 is published).
 #
-# Not included: the repair worker runs repository tests in Docker, which needs
-# access to a Docker daemon. This file deliberately does NOT mount the host
-# Docker socket (that grants root on the host); see docs/OPERATIONS_SECURITY.md.
+# The repair worker is deliberately NOT part of this public-facing stack. It runs
+# untrusted repository tests in Docker containers, so it must run on a dedicated
+# sandbox host with its own local Docker daemon (workspace bind mounts require the
+# worker and the daemon to share a filesystem), connected to this stack's Redis and
+# database over a private network. The host Docker socket is never mounted into any
+# service here: that would give code that escapes a container root on the host.
+# See docs/DEPLOYMENT.md, "Sandbox host".
 x-database-url: &database-url ${DATABASE_URL:-postgresql://repodoctor:${POSTGRES_PASSWORD:-}@postgres:5432/repodoctor?schema=public}
 
 x-server-env: &server-env
@@ -25,6 +29,15 @@ x-server-env: &server-env
   REDIS_HOST: redis
   REDIS_PORT: "6379"
   REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in root .env}
+  # Production refuses plain-http origins. Set ALLOW_INSECURE_HTTP=true ONLY for a local evaluation on localhost.
+  ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:-false}
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: ["/tmp"]
+  stop_grace_period: 60s
 
 services:
   postgres:
@@ -81,6 +94,7 @@ services:
       - backend
 
   server:
+    <<: *hardening
     build:
       context: ./server
       dockerfile: Dockerfile
@@ -109,6 +123,7 @@ services:
       - frontend
 
   scan-worker:
+    <<: *hardening
     build:
       context: ./server
       dockerfile: Dockerfile
@@ -126,25 +141,12 @@ services:
     networks:
       - backend
 
-  repair-worker:
-    build:
-      context: ./server
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    command: ["node", "dist/workers/repair.worker.js"]
-    env_file:
-      - ./server/.env
-    environment:
-      <<: *server-env
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      redis:
-        condition: service_healthy
-    networks:
-      - backend
-
   client:
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID, NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/var/cache/nginx", "/var/run", "/tmp"]
     build:
       context: ./client
       dockerfile: Dockerfile

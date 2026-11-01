@@ -1,0 +1,48 @@
+name: Release images
+
+# Builds, scans and publishes versioned images. Rolling them out to a host is
+# operator-specific and intentionally not automated here (see docs/DEPLOYMENT.md).
+# The `production` environment must be configured in GitHub with required
+# reviewers; the job pauses until a reviewer approves it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Image tag, e.g. 1.4.0"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Environment names must exist in the repository settings before they can be
+    # referenced here. Keep this job unscoped until the required environment is
+    # created in GitHub.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build
+        run: |
+          IMAGE=ghcr.io/${{ github.repository }}
+          docker build -t $IMAGE-server:${{ inputs.version }} server
+          docker build -t $IMAGE-client:${{ inputs.version }} client
+      - name: Scan before publishing (fails on HIGH/CRITICAL with a fix available)
+        uses: aquasecurity/trivy-action@v0.28.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}-server:${{ inputs.version }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Push
+        run: |
+          IMAGE=ghcr.io/${{ github.repository }}
+          docker push $IMAGE-server:${{ inputs.version }}
+          docker push $IMAGE-client:${{ inputs.version }}
