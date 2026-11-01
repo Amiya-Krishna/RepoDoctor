@@ -8,6 +8,7 @@ export interface Repository {
   private: boolean;
   htmlUrl: string;
   cloneUrl: string;
+  autoScan?: boolean;
   createdAt: string;
   updatedAt: string;
 }

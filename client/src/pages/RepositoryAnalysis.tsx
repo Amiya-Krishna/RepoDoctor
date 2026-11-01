@@ -12,10 +12,11 @@ import type {
 } from "../types/repository";
 
 import Spinner from "../components/Spinner";
+import RepairReport from "./RepairReport";
 
 /** Final states: once one of these arrives the repair is over and the spinner stops. */
 const FINAL_REPAIR_STATUSES = new Set([
-  "VERIFIED", "FAILED", "INCONCLUSIVE", "MAX_RETRIES_REACHED", "ERROR", "COMPLETED",
+  "VERIFIED", "AWAITING_APPROVAL", "FAILED", "INCONCLUSIVE", "MAX_RETRIES_REACHED", "ERROR", "COMPLETED",
 ]);
 
 /** A repair is "active" from the click until a final result (or failure) is received. */
@@ -41,10 +42,12 @@ function RepositoryAnalysis({
   const [workingDirectory, setWorkingDirectory] = useState("");
   const [repairStates, setRepairStates] = useState<Record<string, {
     jobId?: string;
+    repairJobId?: string;
     status: string;
     message: string;
     pullRequestUrl?: string;
   }>>({});
+  const [openReport, setOpenReport] = useState<string | null>(null);
   const [repairError, setRepairError] = useState("");
 
   useEffect(() => {
@@ -104,7 +107,7 @@ function RepositoryAnalysis({
 
     socket.on("repair:completed", (event: {
       analysisId?: string; findingId?: string; jobId?: string;
-      result?: { status?: string; summary?: string; pullRequest?: { url?: string } };
+      result?: { status?: string; summary?: string; repairJobId?: string };
     }) => {
       if (event.analysisId !== analysis.id || !event.findingId) return;
       setRepairStates((current) => ({
@@ -112,10 +115,10 @@ function RepositoryAnalysis({
         [event.findingId!]: {
           jobId: event.jobId,
           status: event.result?.status ?? "COMPLETED",
-          message: event.result?.pullRequest?.url
-            ? "Verified repair published as a pull request."
-            : `Repair finished with status ${event.result?.status ?? "COMPLETED"}. No pull request was created.${event.result?.summary ? ` Reason: ${event.result.summary}` : ""}`,
-          pullRequestUrl: event.result?.pullRequest?.url,
+          repairJobId: event.result?.repairJobId,
+          message: event.result?.status === "VERIFIED"
+            ? "The fix passed the tests in an isolated sandbox. Review it and approve to open a pull request; nothing has been pushed yet."
+            : `Repair finished with status ${event.result?.status ?? "COMPLETED"}. No pull request was created.${event.result?.summary ? ` Reason: ${event.result.summary}` : ""} You can adjust the test command or project folder and try again.`,
         },
       }));
     });
@@ -263,6 +266,7 @@ function RepositoryAnalysis({
           </label>
           <p>Tests run in an isolated Docker container with networking disabled. The command runs against the disposable repair workspace, not the original repository.</p>
           {repairError && <p role="alert" style={{ color: "crimson" }}>{repairError}</p>}
+          {openReport && <RepairReport repairJobId={openReport} onClose={() => setOpenReport(null)} />}
 
           <h2>Bug Findings ({analysis.bugFindings?.length ?? 0})</h2>
           {(analysis.bugFindings ?? []).map((finding) => (
@@ -276,13 +280,15 @@ function RepositoryAnalysis({
                 {isRepairActive(repairStates[finding.id]?.status) ? "Repairing…" : "Attempt autonomous repair"}
               </button>
               {repairStates[finding.id] && (
-                <p aria-live="polite">
-                  {isRepairActive(repairStates[finding.id].status) && <Spinner label="Repair in progress" />}
-                  {repairStates[finding.id].status}: {repairStates[finding.id].message}
-                  {repairStates[finding.id].pullRequestUrl && (
-                    <>{" "}<a href={repairStates[finding.id].pullRequestUrl} target="_blank" rel="noreferrer">Open pull request</a></>
+                <div aria-live="polite">
+                  <p>
+                    {isRepairActive(repairStates[finding.id].status) && <Spinner label="Repair in progress" />}
+                    {repairStates[finding.id].status.replace(/_/g, " ")}: {repairStates[finding.id].message}
+                  </p>
+                  {repairStates[finding.id].status === "VERIFIED" && repairStates[finding.id].repairJobId && (
+                    <button type="button" onClick={() => setOpenReport(repairStates[finding.id].repairJobId!)}>Review fix and approve</button>
                   )}
-                </p>
+                </div>
               )}
             </article>
           ))}
@@ -298,13 +304,15 @@ function RepositoryAnalysis({
                 {isRepairActive(repairStates[finding.id]?.status) ? "Repairing…" : "Attempt autonomous repair"}
               </button>
               {repairStates[finding.id] && (
-                <p aria-live="polite">
-                  {isRepairActive(repairStates[finding.id].status) && <Spinner label="Repair in progress" />}
-                  {repairStates[finding.id].status}: {repairStates[finding.id].message}
-                  {repairStates[finding.id].pullRequestUrl && (
-                    <>{" "}<a href={repairStates[finding.id].pullRequestUrl} target="_blank" rel="noreferrer">Open pull request</a></>
+                <div aria-live="polite">
+                  <p>
+                    {isRepairActive(repairStates[finding.id].status) && <Spinner label="Repair in progress" />}
+                    {repairStates[finding.id].status.replace(/_/g, " ")}: {repairStates[finding.id].message}
+                  </p>
+                  {repairStates[finding.id].status === "VERIFIED" && repairStates[finding.id].repairJobId && (
+                    <button type="button" onClick={() => setOpenReport(repairStates[finding.id].repairJobId!)}>Review fix and approve</button>
                   )}
-                </p>
+                </div>
               )}
             </article>
           ))}

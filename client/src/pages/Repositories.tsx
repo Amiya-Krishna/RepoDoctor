@@ -200,7 +200,7 @@ function Repositories() {
   }, [loadRepositories]);
 
   const handleDelete = async (repositoryId: string) => {
-    if (!window.confirm("Remove this repository and its analysis history from RepoDoctor?")) return;
+    if (!window.confirm("Permanently delete this repository and ALL its analyses, patches, test output and repair history from RepoDoctor? This cannot be undone.")) return;
     setDeleteErrors((current) => {
       const next = { ...current };
       delete next[repositoryId];
@@ -294,8 +294,24 @@ function Repositories() {
               View analysis
             </button>
             <button type="button" className="danger" onClick={() => void handleDelete(repository.id)}>
-              Remove repository
+              Delete repository data
             </button>
+            <label className="choice">
+              <input
+                type="checkbox"
+                checked={repository.autoScan === true}
+                onChange={(e) => {
+                  const enabled = e.target.checked;
+                  setRepositories((current) => current.map((r) => (r.id === repository.id ? { ...r, autoScan: enabled } : r)));
+                  api.put(`/repositories/${encodeURIComponent(repository.id)}/auto-scan`, { enabled }, { headers: authHeaders() })
+                    .catch((err: unknown) => {
+                      setRepositories((current) => current.map((r) => (r.id === repository.id ? { ...r, autoScan: !enabled } : r)));
+                      setError(getErrorMessage(err, "Could not change automatic scanning."));
+                    });
+                }}
+              />
+              <span>Scan automatically (on pushes, pull requests and daily). Requires AI processing to be enabled in Privacy.</span>
+            </label>
 
             {deleteError && <p role="alert" className="form-error">{deleteError}</p>}
 

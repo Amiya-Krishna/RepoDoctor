@@ -3,6 +3,11 @@ import axios from "axios";
 import AuthForm from "./components/AuthForm";
 import { AUTH_EXPIRED_EVENT, api, getErrorMessage } from "./lib/api";
 import Repositories from "./pages/Repositories";
+import PrivacySettings, { type DataMode } from "./pages/PrivacySettings";
+import Activity from "./pages/Activity";
+import { authHeaders } from "./lib/auth";
+
+type View = "repos" | "privacy" | "activity";
 
 type Session = "checking" | "anonymous" | "authenticated";
 
@@ -13,6 +18,25 @@ function App() {
   const [userName, setUserName] = useState("");
   const [notice, setNotice] = useState("");
   const [message, setMessage] = useState("");
+  const [view, setView] = useState<View>("repos");
+  const [dataMode, setDataMode] = useState<DataMode | null>(null);
+  const [unread, setUnread] = useState(0);
+
+  const refreshStatus = useCallback(() => {
+    api.get<{ settings: { dataMode: DataMode } }>("/privacy", { headers: authHeaders() })
+      .then((r) => {
+        setDataMode(r.data.settings.dataMode);
+        // First run: send the user to the one-time privacy choice before anything else.
+        if (r.data.settings.dataMode === "NONE") setView((v) => (v === "repos" ? "privacy" : v));
+      })
+      .catch(() => undefined);
+    api.get<{ unread: number }>("/privacy/notifications", { headers: authHeaders() })
+      .then((r) => setUnread(r.data.unread)).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (session === "authenticated") refreshStatus();
+  }, [session, refreshStatus]);
 
   const endSession = useCallback((text: string) => {
     localStorage.removeItem("token");
@@ -63,7 +87,7 @@ function App() {
       .catch(() => undefined);
   };
 
-  const connectGitHub = async () => {
+  const connectGitHub = async (access: "public" | "private") => {
     try {
       const token = localStorage.getItem("token");
       if (!token) {
@@ -71,6 +95,7 @@ function App() {
         return;
       }
       const response = await api.get("/github/connect", {
+        params: { access },
         headers: { Authorization: `Bearer ${token}` },
       });
       window.location.href = response.data.authUrl;
@@ -102,11 +127,32 @@ function App() {
           </button>
         </div>
       </header>
-      <div className="toolbar">
-        <button type="button" onClick={() => void connectGitHub()}>Connect GitHub</button>
-      </div>
+      <nav className="nav" aria-label="Main">
+        <button type="button" aria-current={view === "repos" ? "page" : undefined} onClick={() => setView("repos")}>Repositories</button>
+        <button type="button" aria-current={view === "privacy" ? "page" : undefined} onClick={() => setView("privacy")}>Privacy</button>
+        <button type="button" aria-current={view === "activity" ? "page" : undefined} onClick={() => setView("activity")}>
+          Activity{unread > 0 ? ` (${unread})` : ""}
+        </button>
+      </nav>
+      {dataMode === "NONE" && view !== "privacy" && (
+        <p className="banner" role="status">
+          AI analysis is off, so nothing is sent to any model. <button type="button" onClick={() => setView("privacy")}>Choose a privacy mode</button>
+        </p>
+      )}
       {message && <p className="notice" role="status">{message}</p>}
-      <Repositories />
+      {view === "repos" && (
+        <>
+          <div className="toolbar">
+            <button type="button" onClick={() => void connectGitHub("public")}>Connect GitHub (public repositories)</button>{" "}
+            <button type="button" className="secondary" onClick={() => void connectGitHub("private")} title="Grants GitHub's broader 'repo' permission">
+              Also allow private repositories
+            </button>
+          </div>
+          <Repositories />
+        </>
+      )}
+      {view === "privacy" && <PrivacySettings onChanged={(m) => { setDataMode(m); if (m !== "NONE") setView("repos"); }} />}
+      {view === "activity" && <Activity onRead={() => setUnread(0)} />}
     </main>
   );
 }
