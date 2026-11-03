@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, getErrorMessage } from "../lib/api";
+import { api, getErrorInfo, getErrorMessage } from "../lib/api";
 import { authHeaders } from "../lib/auth";
 
 export type DataMode = "NONE" | "CLOUD" | "LOCAL";
@@ -31,6 +31,7 @@ export default function PrivacySettings({ onChanged }: Props) {
   const [status, setStatus] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
 
   const load = () => {
     api.get<PrivacyResponse>("/privacy", { headers: authHeaders() })
@@ -53,7 +54,11 @@ export default function PrivacySettings({ onChanged }: Props) {
   const needsConsent = mode !== "NONE" && !(data.settings.dataMode === mode && data.settings.consentedAt);
   const unavailable = (mode === "CLOUD" && !data.availability.cloud) || (mode === "LOCAL" && !data.availability.local);
 
+  /** Switching an enabled mode to Off withdraws consent: ask once, plainly, before doing it. */
+  const withdrawing = mode === "NONE" && data.settings.dataMode !== "NONE";
   const save = async () => {
+    if (withdrawing && !confirmWithdraw) { setConfirmWithdraw(true); return; }
+    setConfirmWithdraw(false);
     setSaving(true);
     setStatus(null);
     try {
@@ -64,9 +69,11 @@ export default function PrivacySettings({ onChanged }: Props) {
       setData({ ...data, settings: response.data.settings });
       setConsent(false);
       onChanged(response.data.settings.dataMode);
-      setStatus({ kind: "ok", text: mode === "NONE" ? "AI processing is off. No code will be sent anywhere." : "Saved." });
+      setStatus({ kind: "ok", text: mode === "NONE" ? "AI processing is off. No code will be sent anywhere; requests already in progress are stopped." : "Saved." });
     } catch (e) {
-      setStatus({ kind: "error", text: getErrorMessage(e, "Could not save.") });
+      // Nothing was saved. Show the server's reason and what to do about it (e.g. consent expired, version outdated).
+      const { code, recovery } = getErrorInfo(e);
+      setStatus({ kind: "error", text: `${getErrorMessage(e, "Could not save. Your previous settings are unchanged.")}${recovery ? ` ${recovery}` : ""}${code ? ` (${code})` : ""}` });
     } finally {
       setSaving(false);
     }
@@ -131,8 +138,9 @@ export default function PrivacySettings({ onChanged }: Props) {
       </label>
 
       <button type="button" onClick={() => void save()} disabled={saving || unavailable || (mode !== "NONE" && needsConsent && !consent)}>
-        {saving ? "Saving…" : "Save privacy settings"}
+        {saving ? "Saving…" : withdrawing && confirmWithdraw ? "Confirm: turn AI off" : "Save privacy settings"}
       </button>
+      {confirmWithdraw && <p role="alert" className="notice">Turning AI off withdraws your consent. Scans and repairs that are running will be stopped. Select the button again to confirm. <button type="button" className="secondary" onClick={() => setConfirmWithdraw(false)}>Cancel</button></p>}
       {status && <p role={status.kind === "error" ? "alert" : "status"} className={status.kind === "error" ? "error" : "notice"}>{status.text}</p>}
 
       <h3>Delete my data</h3>

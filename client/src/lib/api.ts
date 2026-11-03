@@ -50,3 +50,14 @@ export const getErrorMessage = (error: unknown, fallback: string): string => {
   if (error instanceof Error && error.message) return error.message;
   return fallback;
 };
+
+/** Machine-readable `code` (e.g. PATCH_CHANGED, CONSENT_EXPIRED) and optional `recovery` text from an API error. */
+export const getErrorInfo = (error: unknown): { code?: string; recovery?: string; status?: number } => {
+  if (!axios.isAxiosError(error)) return {};
+  const data = error.response?.data as { code?: unknown; recovery?: unknown } | undefined;
+  return {
+    status: error.response?.status,
+    code: typeof data?.code === "string" ? data.code : undefined,
+    recovery: typeof data?.recovery === "string" ? data.recovery : undefined,
+  };
+};

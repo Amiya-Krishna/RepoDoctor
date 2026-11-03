@@ -19,7 +19,7 @@ test("first run requires an explicit privacy choice and consent before AI can be
     if (url.pathname.endsWith("/privacy") && route.request().method() === "GET") return json({ settings, disclosure, availability: { cloud: true, local: false } });
     if (url.pathname.endsWith("/privacy") && route.request().method() === "PUT") {
       lastPut = JSON.parse(route.request().postData() ?? "{}");
-      settings = { ...settings, dataMode: String(lastPut.dataMode), consentedAt: "now" };
+      settings = { ...settings, dataMode: String(lastPut?.dataMode), consentedAt: "now" };
       return json({ settings });
     }
     if (url.pathname.endsWith("/privacy/notifications")) return json({ notifications: [], unread: 0 });

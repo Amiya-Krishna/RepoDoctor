@@ -1,15 +1,30 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, getErrorMessage } from "../lib/api";
+import { api, getErrorInfo, getErrorMessage } from "../lib/api";
 import { authHeaders } from "../lib/auth";
 
 interface Change { filePath: string; changeType: string; startLine: number; endLine: number; originalCode: string; replacementCode: string; explanation: string }
 interface Report {
-  repair: { id: string; status: string; errorMessage: string | null; pullRequestUrl: string | null };
-  patch: { title: string; summary: string; risk: string; changes: Change[] } | null;
+  repair: { id: string; status: string; errorMessage: string | null; pullRequestUrl: string | null; branchName?: string | null; pullRequestNumber?: number | null };
+  patch: { title: string; summary: string; risk: string; changes: Change[]; patchHash?: string } | null;
   verification: { status: string; summary: string; confidence: number; evidence: string[]; testPassed: boolean; regressionDetected: boolean } | null;
   testRun: { success: boolean; exitCode: number | null; timedOut: boolean; durationMs: number; testCommand: string[]; stdout: string; stderr: string } | null;
   limitations: string[];
 }
+
+/** Statuses in which a worker is (or should be) progressing the publication, so the page polls. */
+const IN_FLIGHT = ["APPROVED", "PUBLISHING", "REVALIDATING", "TESTING", "BRANCH_PUSHED", "PR_CREATED", "PUBLISH_FAILED_RETRYABLE"];
+/** Approval can still be withdrawn until a branch exists on GitHub. */
+const REVOCABLE = ["APPROVED", "REVALIDATING", "TESTING"];
+
+const PROGRESS: Record<string, string> = {
+  APPROVED: "Approved. Waiting for a worker to start.",
+  PUBLISHING: "Publishing…",
+  REVALIDATING: "Re-applying the patch to a fresh clone of your repository…",
+  TESTING: "Running the tests again before anything is pushed…",
+  BRANCH_PUSHED: "The branch is on GitHub. Creating the pull request…",
+  PR_CREATED: "The pull request was created. Recording it…",
+  PUBLISH_FAILED_RETRYABLE: "A temporary problem interrupted publishing. RepoDoctor will retry automatically.",
+};
 
 const BADGE: Record<string, string> = { VERIFIED: "Verified by a real test run", FAILED: "Failed", INCONCLUSIVE: "Inconclusive — not enough evidence" };
 
@@ -28,19 +43,27 @@ export default function RepairReport({ repairJobId, onClose }: { repairJobId: st
 
   // While publishing, poll so the final state (PR link or an explained failure) appears without a reload.
   useEffect(() => {
-    if (!report || !["APPROVED", "PUBLISHING"].includes(report.repair.status)) return;
+    if (!report || !IN_FLIGHT.includes(report.repair.status)) return;
     const t = setInterval(load, 4000);
     return () => clearInterval(t);
   }, [report, load]);
 
-  const act = async (action: "approve" | "reject") => {
+  const act = async (action: "approve" | "reject" | "revoke-approval") => {
     setBusy(true); setNote("");
     try {
-      const r = await api.post<{ message?: string }>(`/repairs/${encodeURIComponent(repairJobId)}/${action}`, {}, { headers: authHeaders() });
-      setNote(r.data.message ?? (action === "reject" ? "Rejected. Nothing was published." : "Done."));
+      // Approval is bound to the exact patch that is on screen: if it changed, the server refuses (409 PATCH_CHANGED).
+      const body = action === "approve" ? { patchHash: report?.patch?.patchHash ?? "" } : {};
+      const r = await api.post<{ message?: string }>(`/repairs/${encodeURIComponent(repairJobId)}/${action}`, body, { headers: authHeaders() });
+      setNote(r.data.message ?? (action === "reject" ? "Rejected. Nothing was published." : action === "revoke-approval" ? "Approval withdrawn. Nothing was pushed." : "Done."));
       load();
     } catch (e) {
-      setNote(getErrorMessage(e, "That did not work. Nothing was published."));
+      const { code } = getErrorInfo(e);
+      if (code === "PATCH_CHANGED") {
+        setNote("The patch changed after you opened this report, so it was NOT approved. The report has been reloaded: review the new patch and approve again.");
+        load();
+      } else {
+        setNote(getErrorMessage(e, "That did not work. Nothing was published."));
+      }
     } finally { setBusy(false); }
   };
 
@@ -91,7 +114,16 @@ export default function RepairReport({ repairJobId, onClose }: { repairJobId: st
           <button type="button" className="secondary" disabled={busy} onClick={() => void act("reject")}>Reject</button>
         </div>
       )}
-      {["APPROVED", "PUBLISHING"].includes(repair.status) && <p role="status">Re-running tests and creating the pull request…</p>}
+      {IN_FLIGHT.includes(repair.status) && <p role="status">{PROGRESS[repair.status] ?? "Working…"}</p>}
+      {REVOCABLE.includes(repair.status) && (
+        <p><button type="button" className="secondary" disabled={busy} onClick={() => void act("revoke-approval")}>Withdraw approval</button> <small>Possible until the branch is pushed to GitHub.</small></p>
+      )}
+      {repair.status === "NEEDS_REAPPROVAL" && <p role="alert" className="error">Your repository or the patch changed after you approved, so nothing was published. Reload and review the patch again to approve it.</p>}
+      {repair.status === "APPROVAL_REVOKED" && <p role="status">You withdrew your approval. Nothing was published.</p>}
+      {repair.status === "COMPLETED" && repair.pullRequestUrl && <p role="status" className="notice">A pull request was opened. RepoDoctor never merges: review and merge it on GitHub yourself.</p>}
+      {repair.branchName && !repair.pullRequestUrl && ["PUBLISH_BLOCKED", "PUBLISH_FAILED_RETRYABLE", "BRANCH_PUSHED"].includes(repair.status) && (
+        <p role="alert" className="error">The branch <code>{repair.branchName}</code> already exists on GitHub, but no pull request has been created. You can open one from that branch manually.</p>
+      )}
       {repair.pullRequestUrl && <p><a href={repair.pullRequestUrl} target="_blank" rel="noreferrer">Open pull request on GitHub</a></p>}
       {note && <p role="status" className="notice">{note}</p>}
     </section>
