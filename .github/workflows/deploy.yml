@@ -120,14 +120,14 @@ jobs:
           docker build -t "$IMAGE-server:$VERSION" server
           docker build -t "$IMAGE-client:$VERSION" client
       - name: Scan server image (fails on HIGH/CRITICAL with a fix available)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}-server:${{ needs.validate.outputs.version }}
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
       - name: Scan client image (fails on HIGH/CRITICAL with a fix available)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}-client:${{ needs.validate.outputs.version }}
           severity: HIGH,CRITICAL
