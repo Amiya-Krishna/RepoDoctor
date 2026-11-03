@@ -1,59 +1,51 @@
-# RepoDoctor AI — production readiness report
+# RepoDoctor AI — production readiness report (second pass: real infrastructure)
 
 **Verdict: STAGING READY. Not a production candidate.**
-The remediation is implemented and tested against real PostgreSQL, Redis and git, but four things the spec requires as evidence for a production candidate could not be exercised in the build environment: real-container isolation (no Docker daemon), `prisma migrate deploy/diff` (Prisma engines could not be downloaded), the native Prisma query engine (tests used the pure-JS `pg` adapter), and real github.com. Close those in CI/staging (checklist at the end), then reassess.
+Critical checks listed under "Not executed" (gVisor, real GitHub, native Prisma, install container, dedicated sandbox VM) have not been run, so by the project's own rule the project cannot be called production-ready. Raw evidence is in `docs/evidence/`.
 
-## Evidence actually executed
+## Infrastructure actually used (this pass)
+| Component | What was used | Caveat |
+|---|---|---|
+| PostgreSQL | 16.15, local server | not the native Prisma engine (pg driver adapter) |
+| Redis | 7.0.15 with password | — |
+| Docker | Engine 29.9.2, runc, cgroup v1, default seccomp, started inside the build sandbox | **not a dedicated VM**; sandbox image is a **local stand-in** built from the host Node 22 binary because registries are blocked |
+| gVisor | **not available** (`runsc` not installable here) | unverified |
+| GitHub | **none** (no account linked; `api.github.com` unreachable) | local fake REST + local bare git only |
+| Git hosting for Actions SHAs | `git ls-remote` + clones of upstream repos | real data, used for pin verification |
 
+## Exact results
 | Check | Result |
 |---|---|
-| Server `npm test` (`tsx --test src/tests/*.test.ts`) with real PostgreSQL 16 + Redis 7 | **198 tests: 189 pass, 0 fail, 9 skipped** (run twice, identical) |
-| Server `tsc --noEmit`, `npm run build` | clean |
-| Legacy scripts `test:security` (updated, see below), `test:webhook-signature`, `test:static-security`, `test:verification-gate` | exit 0 |
-| Client `vitest run` | 13 pass |
-| Client `tsc -b`, `eslint`, `vite build` | clean |
-| Playwright `privacy-flow.spec.ts` (mocked API, local Chromium) | 2 pass |
-| `docker compose config -q` | valid |
-| Workflow static tests (`workflows.test.ts`, 12) | pass; they also caught invalid YAML in `ci.yml` (fixed) |
-| Postgres backup → restore → migration rehearsal on the restored copy | executed, counts matched, duplicate PR archived |
+| Server suite, all infra required (`REQUIRE_INTEGRATION_TESTS`, `REQUIRE_DOCKER_TESTS`) | **212 tests: 212 pass, 0 fail, 0 skipped** |
+| Real-container isolation (`docker-isolation.test.ts`) | 7/7 pass, incl. non-root, read-only rootfs, zero capabilities, `NoNewPrivs`, no network, no Docker socket / host paths / host secrets, `noexec` /tmp, PID and memory limits |
+| Hostile repository through the real runner (`docker-runner-malicious.test.ts`) | 6/6 pass: network/host-file/secret/privilege attempts fail; runaway process killed at timeout and container removed; memory bomb OOM-killed; escaping symlink refused **before** any container exists; non-zero exit reported; volume cleanup verified |
+| Publication with the **real** sandbox | 26/26 in `publication.test.ts` incl. a patch re-tested in a real container (fails before, passes after) and a patch whose tests still fail in the container being **not** pushed |
+| Migration immutability + 5 install paths on real PostgreSQL | pass (fresh; upgrade without duplicates; duplicates with and without the pre-deploy script; already applied original; already applied edited variant) |
+| Checksum script against two synthetic histories | correctly reports `applied ORIGINAL text` vs `MISMATCH … applied EDITED variant` |
+| Workflow static tests | 14/14: SHA pins required, negative test, pins documented, least privilege, both images scanned before push |
+| Server `tsc`, build; client lint/build/vitest (13)/Playwright (2) | unchanged and passing from the previous pass |
 
-**The 9 skips**, all in `docker-isolation.test.ts` (6) and `sandbox.test.ts` (3): "Docker daemon unavailable in this environment". With `REQUIRE_DOCKER_TESTS=true` (`npm run test:docker`, CI integration job) they fail instead of skipping. Container isolation is therefore verified only at the level of the generated `docker run` arguments (and the policy/path code), **not** by running containers.
+## Findings fixed in this pass
+1. **Sandbox `/tmp` unusable by the non-root user** (tmpfs mounted `0755` root-owned) → `mode=1777` with `noexec,nosuid` kept; would have broken `HOME=/tmp`/npm cache on a real host. Found only because containers were actually run.
+2. **Fork-bomb test was measuring nothing** (async spawn errors counted as successes); now measures 57/200 vs 200/200 with and without `--pids-limit 64`.
+3. **Migration 20261031 had been edited in place** → restored byte-for-byte; fix moved to corrective migration `20261102…` + documented pre-deploy script; hashes of all 17 shipped migrations pinned and tested. (My earlier docs also said "newest" kept; the logic keeps the **earliest** — corrected.)
+4. **`aquasecurity/trivy-action@0.28.0` was not a real tag** (`v0.28.0` is), so scan steps could not have resolved; `v0.28.0` would also have left two nested actions on mutable tags. All five actions now pinned to verified commit SHAs, using trivy-action v0.36.0 whose nested actions are SHA-pinned (`docs/ACTIONS_PINS.md`).
 
-One pre-existing assertion was changed deliberately: `test-security-controls.ts` used to assert that legacy plaintext GitHub tokens are readable; the spec now requires fail-closed, so it asserts the opposite (and the opt-in path). No other test was weakened, removed or skipped to get green.
-
-## Findings by spec section
-
-| § | Item | Status | Evidence |
-|---|---|---|---|
-| 2 | Consent checked before **every** AI request (retries, fallbacks, in flight) | Fixed | `consent-gate.test.ts` (mode change, expiry, withdrawal mid-flight, no retry/fallback on policy errors) |
-| 3 | Durable webhook lifecycle, outbox, deterministic job ids, recovery | Fixed | `webhook*.test.ts` incl. real PG + Redis integration (crash between enqueue and mark, duplicate delivery, Redis outage → not acknowledged as queued) |
-| 4 | Atomic privacy settings + audit, append-only audit | Fixed | `privacy-audit-db.test.ts`, trigger test in `migration-upgrade.test.ts` |
-| 5 | Idempotent PR publication state machine, approval bound to patch hash + base commit | Fixed | `publication.test.ts` (24): crash at each of 7 crash points then recovery → exactly one branch and one PR; existing branch same/different tree; existing PR open/merged; 5xx after push; failing tests; revoke before/during; duplicate approvals; stale patch hash; patch edited after approval; base changed (touched vs unrelated file); wrong user; lost push access; recovery sweep + exhaustion. Remote = local bare git + local fake REST server |
-| 6 | Release workflow hardening | Fixed | `deploy.yml`/`ci.yml` rewritten; `workflows.test.ts` |
-| 7 | Token encryption migration/rotation | Fixed | `token-migration.test.ts` (14) incl. real-PG store; found and fixed a bug where a *throwing* post-write verification skipped the restore of the original value |
-| 8 | DB migration safety | Fixed, partly verified | old-schema-with-data upgrade, duplicates archived, drift check, retention/deletion, concurrency on real PG; backup/restore executed. `migrate deploy/diff` **not run** |
-| 9 | Sandbox and install security | Implemented; containers **not run** | `sandbox-policy.test.ts` (symlink/FIFO/size scan, install policy, non-root install args, gVisor flag, config fail-closed); fixed `~2` being misclassified as a path |
-| 10 | Docs/config sync | Done | `OPERATIONS_SECURITY.md` §10–17, `DEPLOYMENT.md` §2a, `DATABASE_MIGRATIONS.md`, `.env.example`, `docker-compose.yml`, README |
-| 11 | Frontend | Done | approve with `patchHash`, `PATCH_CHANGED`, revoke, new statuses with polling, branch-exists messaging, consent-withdraw confirmation, privacy error codes + recovery text, paginated audit history |
-
-## Remaining risks
-
-| Risk | Severity | Note |
+## Not executed (each one blocks "production candidate")
+| Item | Why | How to close |
 |---|---|---|
-| Container isolation never executed | High | run `npm run test:docker` on the sandbox host / CI; prefer gVisor or rootless; see `OPERATIONS_SECURITY.md` §15 |
-| `prisma migrate deploy/diff` never run; tests used the pg driver adapter, not the native engine | High | CI `migrations` job; rehearse on a restored backup |
-| Edited an already-dated migration (`20261031000000`) | Medium | checksum caveat and resolution in `DEPLOYMENT.md` §2a |
-| GitHub semantics only emulated | Medium | staging run against a throw-away repository |
-| Install container has network access; registry packages are trusted at install time | Medium | `REPAIR_INSTALL_NETWORK=none` with an offline cache removes it |
-| Actions pinned to tags, not SHAs | Low–Med | SHAs could not be verified offline; Dependabot updates tags |
-| `production` environment reviewers are a GitHub setting | Medium | not enforceable from the repo |
-| Prompt injection and redaction are mitigations | Medium | cannot be proven |
-| OAuth `repo` scope broad; 1-day JWTs without revocation; in-memory rate limits | Medium | pre-existing |
-| No external penetration test | — | recommended |
+| gVisor (`runsc`) | binary cannot be obtained here | install on the sandbox VM; run `npm run test:docker` with `REPAIR_SANDBOX_RUNTIME=runsc` |
+| Dedicated staging sandbox VM + upstream `node:22-bookworm-slim` | cannot create VMs or pull images here | run `npm run test:docker` and `docker-runner-malicious` there; results on the stand-in prove flag behaviour on this kernel only |
+| Dependency-install container, malicious `package.json`/lockfile through a real `npm ci` | no npm in the stand-in image, no registry access from containers | run on the sandbox VM; policy layer is unit-tested |
+| Real GitHub: OAuth, webhook delivery + signature from github.com, replay, scan, approval, branch push, PR creation, duplicate webhooks, revoked approval, crash with a real repo | no linked GitHub account, no public URL for webhooks | throw-away repo + a GitHub OAuth App/webhook pointing at staging; follow `OPERATIONS_SECURITY.md` §11 and §13 |
+| Native Prisma: `generate`, `migrate deploy`, `migrate diff`, schema and history verification, upgrade on a representative production backup | `binaries.prisma.sh` blocked (also for the WASM route) | CI `migrations` job; rehearsal per `DEPLOYMENT.md` §2a |
+| Full app rehearsal (API + workers + browser + real model + GitHub) | needs the items above and an AI provider/consent | staging run; consent withdrawal, retention and deletion are covered at service level on real PostgreSQL only |
+| `production` environment reviewers, branch protection | GitHub settings, not readable/settable from here | configure and screenshot in GitHub |
 
-## To reach "production candidate"
-
-1. CI green on a branch with the integration job (real Postgres/Redis/**Docker**, nothing skipped) and the `migrations` job (`migrate deploy` + `migrate diff`).
-2. Staging: sandbox VM with gVisor, `npm run test:docker` passing, one end-to-end run (webhook → scan → approve → PR) on a throw-away GitHub repository, kill the repair worker mid-publish and confirm recovery.
-3. Upgrade rehearsal per `DEPLOYMENT.md` §2a on a restored production backup.
-4. External review.
+## Remaining vulnerabilities and limitations
+- Container escape = host compromise unless gVisor/rootless/dedicated VM is used (runc shares the host kernel; seccomp default only).
+- Install step has network access; registry packages are trusted at install time.
+- SHA pins do not cover an action's own runtime downloads (Trivy binary/database) and the pinned code was inspected only at metadata level.
+- Prompt injection and secret redaction are mitigations. OAuth `repo` scope is broad; JWTs are 1-day, no revocation; rate limiting is in-memory.
+- Case D (install that applied the edited variant): behaviour of `prisma migrate deploy` with a changed checksum was not verified.
+- No external penetration test.

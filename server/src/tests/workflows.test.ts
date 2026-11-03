@@ -68,8 +68,19 @@ test("deploy: no auto-deploy and no merge automation anywhere", () => {
   for (const f of [deploy.text, ci.text]) assert.doesNotMatch(f, /gh pr merge|--auto|automerge|ssh |kubectl|docker compose up/i);
 });
 
-test("every third-party action is pinned to a version tag, never a branch", () => {
-  for (const { text } of [deploy, ci]) for (const m of text.matchAll(/uses:\s*([^\s@]+)@(\S+)/g)) assert.match(m[2], /^(v?\d[\w.]*|[0-9a-f]{40})$/, `${m[1]}@${m[2]}`);
+test("every third-party action is pinned to a full 40-character commit SHA, with a version comment", () => {
+  const uses = [...deploy.text.matchAll(/uses:\s*([^\s@]+)@(\S+)(.*)/g), ...ci.text.matchAll(/uses:\s*([^\s@]+)@(\S+)(.*)/g)];
+  assert.ok(uses.length >= 10);
+  for (const m of uses) { assert.match(m[2], /^[0-9a-f]{40}$/, `${m[1]}@${m[2]} must be a full commit SHA`); assert.match(m[3], /#\s*v\d/, `${m[1]} needs a "# vX.Y.Z" comment`); }
+});
+
+test("negative: a tag-pinned action is rejected by the pin rule", () => {
+  assert.doesNotMatch("v4", /^[0-9a-f]{40}$/); assert.doesNotMatch("0.28.0", /^[0-9a-f]{40}$/);
+});
+
+test("pinned SHAs match the verified table in docs/ACTIONS_PINS.md", () => {
+  const doc = fs.readFileSync(path.join(root, "docs/ACTIONS_PINS.md"), "utf8");
+  for (const m of (deploy.text + ci.text).matchAll(/uses:\s*([^\s@]+)@([0-9a-f]{40})/g)) assert.ok(doc.includes(m[2]), `${m[1]}@${m[2]} is not documented as verified`);
 });
 
 test("ci: default permissions are read-only and workflow cancels superseded runs", () => {

@@ -9,8 +9,8 @@ name: Release images
 #  - BOTH images are built and scanned with Trivy BEFORE anything is pushed.
 #  - Publishing runs in the `production` environment, which must have required reviewers configured in GitHub
 #    (repository setting; it cannot be enforced from this file).
-#  - Third-party actions are pinned to release tags. Pinning to commit SHAs is recommended and tracked in
-#    docs/PRODUCTION_READINESS_REPORT.md; Dependabot keeps the tags current.
+#  - Every third-party action is pinned to a full commit SHA (see docs/ACTIONS_PINS.md for how each was verified);
+#    Dependabot proposes SHA updates. trivy-action is pinned at a version whose own nested actions are SHA-pinned.
 #  - Images are never deployed or auto-rolled-out from here, and nothing is merged automatically.
 
 on:
@@ -76,8 +76,8 @@ jobs:
       REQUIRE_DOCKER_TESTS: "true"
       REQUIRE_INTEGRATION_TESTS: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -110,7 +110,7 @@ jobs:
     env:
       VERSION: ${{ needs.validate.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build images (not pushed yet)
         env:
           REPO: ${{ github.repository }}
@@ -120,20 +120,20 @@ jobs:
           docker build -t "$IMAGE-server:$VERSION" server
           docker build -t "$IMAGE-client:$VERSION" client
       - name: Scan server image (fails on HIGH/CRITICAL with a fix available)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}-server:${{ needs.validate.outputs.version }}
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
       - name: Scan client image (fails on HIGH/CRITICAL with a fix available)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}-client:${{ needs.validate.outputs.version }}
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

@@ -236,7 +236,7 @@ What isolates untrusted repository code, honestly:
 | Dedicated VM, no secrets, egress allow-list (169.254.169.254 blocked) | blast radius of any escape | an attacker with an escape and the host's own credentials, if any |
 | Firecracker/Kata micro-VMs | strongest option (hardware virtualisation per job) | needs operator infrastructure not provided here |
 
-Recommendation: dedicated VM **plus** gVisor (`runsc`) as the default for any deployment that processes repositories from people you do not know; set `REPAIR_REQUIRE_HARDENED_RUNTIME=true` to make that mandatory. This was evaluated by design review; gVisor was **not** installed or exercised in the build environment.
+Recommendation: dedicated VM **plus** gVisor (`runsc`) as the default for any deployment that processes repositories from people you do not know; set `REPAIR_REQUIRE_HARDENED_RUNTIME=true` to make that mandatory. This was evaluated by design review; gVisor was **not** installed or exercised in any environment so far.
 
 The dependency-install step is the only one with network access. It is non-root, capability-less and read-only, scripts are disabled, and `install-policy.ts` rejects repositories whose manifests/lockfiles point at hosts other than the npm/yarn registries; set `REPAIR_INSTALL_NETWORK=none` if you pre-seed an offline cache. A malicious *registry* package can still read the workspace during install and phone home: treat the install container as part of the untrusted zone.
 
@@ -252,9 +252,10 @@ Alert on: `/api/ready` false; Redis queue backlog; `WebhookDelivery` rows `FAILE
 | Unwanted branch/PR created | confirm via `RepairJob.branchName/pullRequestNumber` and the `PR_APPROVED` audit event (patch hash); close the PR; RepoDoctor never merges |
 | Data-subject deletion request | use the in-app deletion; then confirm no rows remain; note backup retention |
 
-## 17. Known limitations
+## 17. Known limitations (what was and was not executed)
 
-- Prisma's engines could not be downloaded where this was built: tests ran against real PostgreSQL through the pure-JS `pg` driver adapter (`PRISMA_DRIVER_ADAPTER=pg`, client generated engine-free), **not** the native query engine; `prisma migrate deploy` and `prisma migrate diff` were not run there (CI runs them).
-- GitHub behaviour was exercised against a local fake of the REST endpoints used and a local bare git repository, not github.com.
-- Real-container isolation tests need a Docker daemon; they skip (visibly) without one and fail with `REQUIRE_DOCKER_TESTS=true`.
+- **Docker (executed, with a caveat).** A real Docker 29.9.2 daemon (runc, cgroup v1, default seccomp) was started inside the build sandbox (itself a Firecracker-style microVM, kernel 6.18) and all real-container tests ran: non-root, read-only root, no capabilities, `no-new-privileges`, no network, no Docker socket/host paths/host secrets, `noexec` tmpfs, PID and memory limits, hostile-repository scripts, timeout kill, cleanup of containers and volumes, and the publication pipeline using the real sandbox. This is **not a dedicated staging VM**, the sandbox image was a **local stand-in built from the host's Node binary** (registries are blocked here), and the dependency-install container was **not** run (no npm in the stand-in image, no registry access).
+- **gVisor: not executed.** `runsc` could not be obtained (download host blocked, not in the distribution archive). The `--runtime` plumbing and configuration checks are unit-tested only. Treat gVisor as unverified.
+- **Real GitHub: not executed.** No GitHub account was linked to the build session and `github.com`/`api.github.com` were unreachable except through `git ls-remote`. OAuth, webhooks delivered by github.com, real branch pushes and PR creation were exercised only against a local fake REST server and a local bare git repository.
+- **Prisma: native engine not executed.** `binaries.prisma.sh` is blocked, and Prisma's WebAssembly route was tried and also fetches the schema-engine binary. Tests ran through the pure-JS `pg` driver adapter. `prisma migrate deploy` / `migrate diff` were never run; the schema-vs-database comparison test is a stand-in.
 - Redaction and prompt-injection defences are mitigations, not guarantees.

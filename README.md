@@ -488,8 +488,9 @@ Docker volumes left behind by an interrupted run can be removed with `docker vol
 1. [Architecture](docs/ARCHITECTURE.md) — reference diagram, stack, API surface, flows, trust boundaries.
 2. [Operations and security](docs/OPERATIONS_SECURITY.md) — environment variables, security controls, Compose deployment, failure triage.
 3. [Deployment](docs/DEPLOYMENT.md) and [database migrations](docs/DATABASE_MIGRATIONS.md) — upgrade order, backup/restore, sandbox host.
-3a. [Production readiness report](docs/PRODUCTION_READINESS_REPORT.md) — what was verified, how, and what is not.
-3b. [Manual testing guide](docs/MANUAL_TESTING_GUIDE.md) — setup and functional test cases.
+3a. [GitHub Actions pins](docs/ACTIONS_PINS.md) and [evidence logs](docs/evidence/).
+3b. [Production readiness report](docs/PRODUCTION_READINESS_REPORT.md) — what was verified, how, and what is not.
+3c. [Manual testing guide](docs/MANUAL_TESTING_GUIDE.md) — setup and functional test cases.
 4. [Development history](docs/DEVELOPMENT_HISTORY.md) — day-by-day development log of the 30-day plan.
 5. [Server](server/README.md) and [client](client/README.md) notes.
 

@@ -57,9 +57,11 @@ test("container: /tmp is noexec", { skip }, () => {
 });
 
 test("container: pids limit stops a fork bomb; memory limit kills a runaway allocation", { skip }, () => {
-  const o = last(probe(`const cp=require("child_process");let n=0,fail=0;for(let i=0;i<200;i++){try{cp.spawn("sleep",["5"],{stdio:"ignore"});n++}catch{fail++}}
-setTimeout(()=>{console.log(JSON.stringify({n,fail}));process.exit(0)},500)`));
-  assert.ok(o.fail > 0 || o.n < 200, JSON.stringify(o));
+  // spawn() reports EAGAIN asynchronously, so count 'spawn' vs 'error' events (not exceptions).
+  const o = last(probe(`const cp=require("child_process");let ok=0,fail=0,done=0;const N=200;
+for(let i=0;i<N;i++){const c=cp.spawn("sleep",["3"],{stdio:"ignore"});c.on("spawn",()=>{ok++;chk()});c.on("error",()=>{fail++;chk()})}
+function chk(){if(++done===N){console.log(JSON.stringify({ok,fail}));process.exit(0)}}`));
+  assert.ok(o.fail > 0 && o.ok < 200, `pids limit (64) did not stop the fork bomb: ${JSON.stringify(o)}`);
   const m = probe(`const a=[];for(;;)a.push(Buffer.alloc(50*1024*1024,1))`);
   assert.notEqual(m.status, 0);
 });

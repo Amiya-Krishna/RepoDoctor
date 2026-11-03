@@ -103,7 +103,8 @@ async function seed(opts: { approve?: boolean } = {}): Promise<World> {
   const work = path.join(root, `work${n}`);
   git(root, "clone", remote, work);
   fs.mkdirSync(path.join(work, "src"));
-  fs.writeFileSync(path.join(work, "src/a.js"), "function add(a, b) {\n  return a - b;\n}\n");
+  fs.writeFileSync(path.join(work, "src/a.js"), "function add(a, b) {\n  return a - b;\n}\nmodule.exports = add;\n");
+  fs.writeFileSync(path.join(work, "check.js"), "const add = require('./src/a.js');\nif (add(1, 2) !== 3) { console.error('add(1,2) !== 3'); process.exit(1); }\nconsole.log('ok');\n");
   fs.writeFileSync(path.join(work, "src/other.js"), "module.exports = 1;\n");
   git(work, "add", "."); git(work, "commit", "-m", "init"); git(work, "branch", "-M", "main"); git(work, "push", "origin", "main");
   const baseSha = git(work, "rev-parse", "HEAD");
@@ -340,4 +341,38 @@ test("recovery sweep re-queues stale publication stages with a new generation an
   const r2 = await recovery.recoverStaleRepairJobs(async () => undefined, later());
   assert.equal(r2.blocked, 1);
   assert.equal((await job(w)).status, "PUBLISH_BLOCKED");
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// REAL sandbox: the default dependencies (real `docker run` via buildSandboxRunArgs) instead of the stub.
+// ---------------------------------------------------------------------------------------------------------------------
+import { spawnSync } from "node:child_process";
+const dockerUp = spawnSync("docker", ["image", "inspect", "node:22-bookworm-slim"], { encoding: "utf8" }).status === 0;
+const dockerSkip = skip || (dockerUp ? false : "Docker daemon or node:22-bookworm-slim image unavailable");
+if (!dockerUp && process.env.REQUIRE_DOCKER_TESTS === "true") test("docker required for real-sandbox publication", () => assert.fail("REQUIRE_DOCKER_TESTS=true but Docker/image unavailable"));
+const realDeps = (w: World) => ({ ...pub.defaultPublicationDeps(), effects: () => ({ audit: async (e: any) => { w.effects.audits.push(e); }, notify: async (n: any) => { w.effects.notes.push(n); } }) });
+const setCheck = (w: World) => prisma.repairJob.update({ where: { id: w.jobId }, data: { testCommand: ["node", "check.js"] } });
+
+test("REAL SANDBOX: the patch is re-tested in a real container (fails before, passes after) and only then pushed", { skip: dockerSkip }, async () => {
+  process.env.REPAIR_INSTALL_DEPENDENCIES = "false";
+  const w = await seed(); await setCheck(w);
+  const out = await run(w, realDeps(w));
+  assert.equal(out.status, "PUBLISHED", JSON.stringify(out) + JSON.stringify(w.effects.notes.at(-1)));
+  assert.equal(branches(w).length, 1); assert.equal(prsFor(w).length, 1);
+  assert.equal(spawnSync("docker", ["ps", "-aq", "--filter", "label=repodoctor.sandbox"], { encoding: "utf8" }).stdout.trim(), "", "no sandbox container left behind");
+});
+
+test("REAL SANDBOX: a patch whose tests still fail in the container is NOT pushed", { skip: dockerSkip }, async () => {
+  process.env.REPAIR_INSTALL_DEPENDENCIES = "false";
+  const w = await seed(); await setCheck(w);
+  // Same patch location, but the replacement leaves the bug in place (it is still approved and hash-bound).
+  const bad = { ...CHANGE, replacementCode: "  return a * b;" };
+  const proposal = await prisma.fixProposal.findFirstOrThrow({ where: { id: (await job(w)).fixProposalId! } });
+  const newHash = hash.computePatchHash([bad as never], w.repoId);
+  await prisma.fixProposal.update({ where: { id: proposal.id }, data: { changes: [bad] } });
+  await prisma.repairJob.update({ where: { id: w.jobId }, data: { patchHash: newHash, approvedPatchHash: newHash } });
+  const out = await run(w, realDeps(w));
+  assert.equal(out.status, "BLOCKED");
+  assert.equal(branches(w).length, 0); assert.equal(prsFor(w).length, 0);
+  assert.match(w.effects.notes.at(-1).message, /Nothing was pushed/);
 });

@@ -192,7 +192,7 @@ export function buildInstallRunArgs(
     "--cap-drop", "ALL",
     "--security-opt", "no-new-privileges",
     "--read-only",
-    "--tmpfs", "/tmp:rw,nosuid,size=768m",
+    "--tmpfs", "/tmp:rw,nosuid,mode=1777,size=768m",
     "-e", "HOME=/tmp", "-e", "npm_config_cache=/tmp/.npm", "-e", "CI=true",
     "-v", `${o.resolved}:/workspace/repository:rw`,
     "-v", `${o.volumeName}:${o.containerDirectory}/node_modules`,

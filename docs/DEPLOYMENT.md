@@ -33,16 +33,30 @@ Startup checks (`server/src/config/startup-checks.ts`) abort the API and both wo
 
 If you are upgrading an installation that stored tokens in plaintext: set the key, **take a database backup**, then `npm run tokens:migrate -- --dry-run` and `npm run tokens:migrate -- --i-have-a-backup` (idempotent). The API and workers refuse to start in production until no plaintext token remains.
 
-## 2a. Upgrading an existing installation (required order)
+## 2a. Installing and upgrading (migrations are immutable)
 
-1. **Back up** PostgreSQL (`pg_dump -Fc`), and verify the dump restores (`docs/DATABASE_MIGRATIONS.md`).
-2. Run the read-only pre-flight: `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/scripts/db-preflight.sql` (duplicate pull requests, plaintext tokens, job statuses).
-3. Stop the workers; deploy the new images; `prisma migrate deploy` (Compose `migrate` service). Duplicate `PullRequest` rows are copied to `PullRequestDuplicateArchive` first, the newest per finding is kept. `APPROVED` repairs with no recorded patch hash are reset to `AWAITING_APPROVAL` (re-approval is required); `PUBLISHED` becomes `COMPLETED`.
-4. Set the encryption variables, then migrate tokens (section 2). Start the API and workers.
-5. Confirm: `/api/ready`, startup logs show no `[config] warning`, `SELECT status,count(*) FROM "WebhookDelivery" GROUP BY 1`.
-6. Roll back by restoring the backup; migrations are forward-only.
+Shipped migrations are **never edited**: `server/prisma/SHIPPED_MIGRATIONS.sha256` pins the sha256 of every migration from the original release and `migration-upgrade.test.ts` fails if one changes. Fixes go into new, forward-only migrations. `20261031000000_privacy_security_hardening` is back to its original text; an earlier remediation build had edited it in place (that text is kept for reference in `docs/migration-variants/`), which is why there are two upgrade situations below.
 
-> Caveat: `20261031000000_privacy_security_hardening` was **edited in place** (it now archives duplicate pull requests before creating the unique index). An installation that already applied the previous text of that file will see a checksum mismatch from `prisma migrate deploy`/`migrate status`. If that is you, the old text never could have succeeded on data with duplicates, so check `_prisma_migrations`: if the migration is recorded as applied, run `prisma migrate resolve --applied 20261031000000_privacy_security_hardening` only after confirming the unique index `PullRequest_analysisId_findingId_key` exists.
+### Fresh installation (empty database)
+1. `npx prisma migrate deploy` — applies every migration in order, including the corrective `20261102000000_pull_request_duplicate_archive`.
+2. Set the secrets (section 2), start the stack. There are no tokens to migrate.
+
+### Existing installation — first find out where you are
+```bash
+cd server
+DATABASE_URL=... ./scripts/migration-checksum-check.sh        # read-only
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db-preflight.sql
+```
+Whether `20261031000000` has been applied in **your** environment cannot be known from the repository; the script reports it per migration and says `applied ORIGINAL text`, `applied EDITED variant`, or nothing (not applied).
+
+| Situation | Procedure |
+|---|---|
+| **A. `20261031…` not applied, pre-flight shows 0 duplicate pull requests** | Back up → `prisma migrate deploy`. |
+| **B. `20261031…` not applied, duplicates > 0** | Back up → `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/pre-migrate-archive-duplicate-pull-requests.sql` (keeps the earliest row per finding, archives the rest in one transaction, idempotent) → `prisma migrate deploy`. Without the script the migration fails **atomically** (nothing half-applied; verified by test) and Prisma records it as failed: fix the data, then `prisma migrate resolve --rolled-back 20261031000000_privacy_security_hardening` and deploy again. |
+| **C. `20261031…` applied with the ORIGINAL text** (checksum matches) | Back up → `prisma migrate deploy`. Only `20261101000000` and `20261102000000` run. |
+| **D. `20261031…` applied with the EDITED variant** (script says so; `prisma migrate status` reports the file changed) | The database state is already a superset of the original. Back up → `prisma migrate deploy` runs the two new migrations; the corrective one is an idempotent no-op (verified by test). The recorded checksum for `20261031…` will differ from the restored file. **Do not** rewrite `_prisma_migrations` blindly: first confirm that `PullRequest_analysisId_findingId_key` exists, then either keep the mismatch (recorded, understood) or, with a backup and after review, update that single row's checksum to the original's sha256 printed by the script. How `prisma migrate deploy` itself reacts to the mismatch was **not** verified here (native engine unavailable): rehearse on a restored copy first. |
+
+After any path: tokens (section 2: backup → `tokens:migrate --dry-run` → `--i-have-a-backup`), start API and workers, check `/api/ready`, startup logs (no `[config] warning`), and `SELECT status,count(*) FROM "WebhookDelivery" GROUP BY 1`. `APPROVED` repairs with no recorded patch hash are reset to `AWAITING_APPROVAL` (re-approval required); `PUBLISHED` becomes `COMPLETED`. Roll back only by restoring the backup.
 
 ## 3. Application stack
 
@@ -81,7 +95,7 @@ Hardening options (see `OPERATIONS_SECURITY.md` §15): install gVisor and set `R
 
 `.github/workflows/ci.yml` runs on every pull request: typecheck and unit tests; an **integration** job with real PostgreSQL 16, Redis 7 and Docker (`REQUIRE_INTEGRATION_TESTS` / `REQUIRE_DOCKER_TESTS` make a missing dependency fail instead of skip); migrations applied plus `prisma migrate diff` drift check; client lint, component tests, build and Playwright; `npm audit`; Trivy (filesystem incl. secrets and misconfiguration, and both images).
 
-`deploy.yml` is a manual release: the version input is validated as SemVer and only ever passed through `env` (never interpolated into a shell script); tests must pass first; **both** images are built and scanned before **anything** is pushed; the push runs in the `production` environment (configure required reviewers in GitHub — a repository setting this file cannot enforce); permissions are `contents: read`, with `packages: write` only on the publish job. Actions are pinned to release tags, not commit SHAs: pinning to SHAs is recommended and must be done where the SHAs can be verified (Dependabot keeps tags current). Rolling images out to hosts is operator-specific and not automated; nothing merges automatically.
+`deploy.yml` is a manual release: the version input is validated as SemVer and only ever passed through `env` (never interpolated into a shell script); tests must pass first; **both** images are built and scanned before **anything** is pushed; the push runs in the `production` environment (configure required reviewers in GitHub — a repository setting this file cannot enforce); permissions are `contents: read`, with `packages: write` only on the publish job. Every third-party action is pinned to a verified full commit SHA (`docs/ACTIONS_PINS.md` records how); Dependabot proposes SHA bumps. Rolling images out to hosts is operator-specific and not automated; nothing merges automatically.
 
 ## 7. Operations
 

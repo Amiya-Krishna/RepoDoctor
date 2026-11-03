@@ -1,7 +1,8 @@
 -- Read-only pre-flight for the privacy/reliability migrations. Run BEFORE `prisma migrate deploy`:
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/db-preflight.sql
--- It changes nothing. Review every result; "duplicate_pull_requests" > 0 means the migration will archive rows
--- into "PullRequestDuplicateArchive" (the newest row per analysis+finding is kept).
+-- It changes nothing. Review every result. "duplicate_pull_requests" > 0 means migration 20261031000000 WILL FAIL
+-- (atomically) unless you first run scripts/pre-migrate-archive-duplicate-pull-requests.sql, which keeps the EARLIEST
+-- row per (analysisId, findingId) and archives the rest. Skip that only if 20261031000000 is already applied.
 \echo '== duplicate PullRequest rows per (analysisId, findingId)'
 SELECT count(*) AS duplicate_groups, coalesce(sum(n - 1), 0) AS duplicate_pull_requests
 FROM (SELECT count(*) AS n FROM "PullRequest" GROUP BY "analysisId", "findingId" HAVING count(*) > 1) d;

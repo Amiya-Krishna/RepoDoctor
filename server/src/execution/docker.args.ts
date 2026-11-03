@@ -73,8 +73,8 @@ export function buildSandboxRunArgs(
     "--read-only",
     ...(limits.user ? ["--user", limits.user] : []),
 
-    "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
-    "--tmpfs", "/run:rw,noexec,nosuid,size=64m",
+    "--tmpfs", "/tmp:rw,noexec,nosuid,mode=1777,size=256m",
+    "--tmpfs", "/run:rw,noexec,nosuid,mode=1777,size=64m",
 
     "-v", `${repositoryPath}:/workspace/repository:rw`,
     ...(input.nodeModulesVolumes ?? []).flatMap((volume) => [
