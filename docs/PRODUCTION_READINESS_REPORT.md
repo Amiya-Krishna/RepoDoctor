@@ -1,72 +1,59 @@
-# RepoDoctor AI — verified features and remaining risks
+# RepoDoctor AI — production readiness report
 
-**Verdict: not yet production-ready.** The security controls below are implemented and unit-tested, but the system has **not** been run end to end (real PostgreSQL + Redis + Docker daemon + GitHub + a model) in the environment where this work was done. Do not expose it publicly until the "Not verified" list is closed.
+**Verdict: STAGING READY. Not a production candidate.**
+The remediation is implemented and tested against real PostgreSQL, Redis and git, but four things the spec requires as evidence for a production candidate could not be exercised in the build environment: real-container isolation (no Docker daemon), `prisma migrate deploy/diff` (Prisma engines could not be downloaded), the native Prisma query engine (tests used the pure-JS `pg` adapter), and real github.com. Close those in CI/staging (checklist at the end), then reassess.
 
-## How this was checked
+## Evidence actually executed
 
 | Check | Result |
 |---|---|
-| New security/unit test suite (`cd server && npm test`) | 81 tests: **78 pass, 0 fail, 3 skipped** |
-| Original non-DB scripts: `test:security` (updated), `test:webhook-signature`, `test:static-security`, `test:verification-gate`, `test:ai-selection`, `test:risk-engine` | pass |
-| Server `tsc --noEmit` | only the 14 errors that already existed when no Prisma client can be generated (missing generated types); none introduced |
+| Server `npm test` (`tsx --test src/tests/*.test.ts`) with real PostgreSQL 16 + Redis 7 | **198 tests: 189 pass, 0 fail, 9 skipped** (run twice, identical) |
+| Server `tsc --noEmit`, `npm run build` | clean |
+| Legacy scripts `test:security` (updated, see below), `test:webhook-signature`, `test:static-security`, `test:verification-gate` | exit 0 |
+| Client `vitest run` | 13 pass |
 | Client `tsc -b`, `eslint`, `vite build` | clean |
-| Client UI in a headless browser against a mocked API | privacy page renders; Save stays disabled until a mode is chosen *and* consent ticked; consent request carries `consent:true` and the consent version |
+| Playwright `privacy-flow.spec.ts` (mocked API, local Chromium) | 2 pass |
+| `docker compose config -q` | valid |
+| Workflow static tests (`workflows.test.ts`, 12) | pass; they also caught invalid YAML in `ci.yml` (fixed) |
+| Postgres backup → restore → migration rehearsal on the restored copy | executed, counts matched, duplicate PR archived |
 
-The 3 skipped tests are the real-container isolation checks (network unreachable, read-only root and non-root user, memory limit). They need a Docker daemon and the `node:22-bookworm-slim` image; **there was none here, so container isolation is verified only at the level of the generated `docker run` arguments**. They run automatically in CI and on any sandbox host.
+**The 9 skips**, all in `docker-isolation.test.ts` (6) and `sandbox.test.ts` (3): "Docker daemon unavailable in this environment". With `REQUIRE_DOCKER_TESTS=true` (`npm run test:docker`, CI integration job) they fail instead of skipping. Container isolation is therefore verified only at the level of the generated `docker run` arguments (and the policy/path code), **not** by running containers.
 
-## Verified by automated tests
+One pre-existing assertion was changed deliberately: `test-security-controls.ts` used to assert that legacy plaintext GitHub tokens are readable; the spec now requires fail-closed, so it asserts the opposite (and the opt-in path). No other test was weakened, removed or skipped to get green.
 
-- **Consent enforcement:** default mode sends nothing; each mode needs consent for the current terms version; outdated consent, missing backend configuration, and withdrawn consent all refuse; no provider is built and no prompt reaches a model when refused; a failing audit log blocks both consent changes and AI egress (fail closed).
-- **Secret detection/redaction:** GitHub, AWS, Google, Slack, Stripe, npm, OpenAI-style, JWT, PEM (including truncated), URL credentials, bearer tokens, credential assignments (code/JSON/env). Ordinary code and `process.env.X` lookups are left intact. Redacted text is re-scanned; any remainder blocks the request. Sensitive files (`.env`, `*.pem`, `id_rsa`, …) are excluded by path.
-- **Prompt injection:** repository text sits in a nonce-delimited untrusted block that cannot forge its closing marker; a fixed rules preamble is added to every request; if a model nevertheless obeys an injected instruction, the resulting patch (CI file edits, `child_process`, exfiltration via `fetch`, `package.json` scripts) is rejected. *This is mitigation: no test can prove a model will never be misled.*
-- **Token encryption:** ciphertext only, round trip, tamper/wrong-key detection, fresh IV, hard failure without a key, plaintext only with an explicit non-production opt-in; production startup refuses weak/missing secrets, http origins and plaintext mode.
-- **Webhooks:** valid/invalid/malformed signatures; bad signatures consume no delivery id; replay of a signed delivery rejected; store outage → 503, nothing queued; fork PRs and non-opted-in repositories ignored.
-- **Command/patch safety:** `node -e`, `npx`, shells, chaining, `npm install` and similar refused; patches touching `.github`, `.git`, Dockerfiles, `.env`, lockfiles, `package.json`, escaping paths, planted symlinks (real filesystem test: the outside file stays untouched), oversize patches, secrets, and newly introduced `eval`/`child_process`/network calls refused; DELETE must match the text it removes.
-- **Verification:** a model verdict of VERIFIED is downgraded unless the sandbox run exited 0 without timeout; timeouts are INCONCLUSIVE; before any push the stored verdict is not trusted and the tests must pass again on a fresh clone.
-- **Authorization / duplicates:** approval only by the repository owner (other users and unknown ids get the identical 404); only `AWAITING_APPROVAL` can be approved; one live repair and one pull request per finding; deterministic queue job ids; one scheduled scan per repository per interval.
-- **Recovery decisions:** stale `RUNNING`/`PUBLISHING` jobs are marked interrupted, lost approvals re-queued, healthy long jobs left alone.
-- **Sandbox arguments:** `--network none`, `--ipc none`, `--cap-drop ALL`, `no-new-privileges`, read-only root, non-root user, memory (no swap)/CPU/PID/file limits, tmpfs `noexec`, only the disposable workspace mounted, no host environment forwarded, no way to inject docker options through the test command.
+## Findings by spec section
 
-## Implemented but NOT verified (needs a real environment)
-
-1. **Database behaviour.** Prisma's engines could not be downloaded in this environment, so the schema/migration (`20261031000000_privacy_security_hardening`) was never applied to a database and the Prisma code paths (controllers, lifecycle/deletion/purge, recovery, publish service, notifications, per-user repository uniqueness) were never executed. They typecheck structurally but are untested. CI's `migrations` job applies the migrations to PostgreSQL and checks for schema drift: **make it pass before merging.** Existing installs: back up first — the migration drops the global unique index on `Repository.githubId`, makes `RepairJob → Analysis` cascade, and adds a unique `(analysisId, findingId)` on `PullRequest` (duplicates in existing data would make it fail).
-2. **Queues and workers end to end:** approval → publish worker → PR; crash recovery against a real killed worker; BullMQ job-id deduplication under concurrent requests.
-3. **Docker isolation on a real host**, including that the new default (`--user 1000:1000`, 512 MB, 1 CPU) does not break your repositories' test runs; override with `REPAIR_SANDBOX_USER`, `REPAIR_TEST_MEMORY`, `REPAIR_TEST_CPUS`. The dependency-install step still has network access (lifecycle scripts disabled).
-4. **Local-AI mode** against a real Ollama/vLLM endpoint, and **Cloud mode** against real providers.
-5. **GitHub flows:** OAuth scope change, webhook delivery, real pull request creation.
-6. Docker image builds, Trivy results, `npm audit` results: workflows are written, not run.
-
-## Behaviour changes to be aware of
-
-- AI analysis is **off for every user until they choose a mode and consent** (existing users included).
-- Verified repairs no longer open pull requests automatically; the owner must approve, then tests re-run.
-- Webhook scans run only for repositories with "Scan automatically" enabled.
-- GitHub sign-in requests `public_repo` by default; private repositories need the explicit "allow private" button (`repo` scope). `read:user`/`user:email` are no longer requested.
-- The API will not store a GitHub token without `GITHUB_TOKEN_ENCRYPTION_KEY`; production will not start without it.
-- `repair-worker` was removed from the public compose file (it could only ever return INCONCLUSIVE there); run it on a dedicated sandbox host (`docs/DEPLOYMENT.md`).
-- Importing the AI config no longer crashes the API when no provider key exists; the privacy gate reports it per request.
+| § | Item | Status | Evidence |
+|---|---|---|---|
+| 2 | Consent checked before **every** AI request (retries, fallbacks, in flight) | Fixed | `consent-gate.test.ts` (mode change, expiry, withdrawal mid-flight, no retry/fallback on policy errors) |
+| 3 | Durable webhook lifecycle, outbox, deterministic job ids, recovery | Fixed | `webhook*.test.ts` incl. real PG + Redis integration (crash between enqueue and mark, duplicate delivery, Redis outage → not acknowledged as queued) |
+| 4 | Atomic privacy settings + audit, append-only audit | Fixed | `privacy-audit-db.test.ts`, trigger test in `migration-upgrade.test.ts` |
+| 5 | Idempotent PR publication state machine, approval bound to patch hash + base commit | Fixed | `publication.test.ts` (24): crash at each of 7 crash points then recovery → exactly one branch and one PR; existing branch same/different tree; existing PR open/merged; 5xx after push; failing tests; revoke before/during; duplicate approvals; stale patch hash; patch edited after approval; base changed (touched vs unrelated file); wrong user; lost push access; recovery sweep + exhaustion. Remote = local bare git + local fake REST server |
+| 6 | Release workflow hardening | Fixed | `deploy.yml`/`ci.yml` rewritten; `workflows.test.ts` |
+| 7 | Token encryption migration/rotation | Fixed | `token-migration.test.ts` (14) incl. real-PG store; found and fixed a bug where a *throwing* post-write verification skipped the restore of the original value |
+| 8 | DB migration safety | Fixed, partly verified | old-schema-with-data upgrade, duplicates archived, drift check, retention/deletion, concurrency on real PG; backup/restore executed. `migrate deploy/diff` **not run** |
+| 9 | Sandbox and install security | Implemented; containers **not run** | `sandbox-policy.test.ts` (symlink/FIFO/size scan, install policy, non-root install args, gVisor flag, config fail-closed); fixed `~2` being misclassified as a path |
+| 10 | Docs/config sync | Done | `OPERATIONS_SECURITY.md` §10–17, `DEPLOYMENT.md` §2a, `DATABASE_MIGRATIONS.md`, `.env.example`, `docker-compose.yml`, README |
+| 11 | Frontend | Done | approve with `patchHash`, `PATCH_CHANGED`, revoke, new statuses with polling, branch-exists messaging, consent-withdraw confirmation, privacy error codes + recovery text, paginated audit history |
 
 ## Remaining risks
 
-| Risk | Severity | Notes |
+| Risk | Severity | Note |
 |---|---|---|
-| Not run end to end | High | see above |
-| Repository code executes on the sandbox host; a container escape reaches that host | High | use a dedicated, network-isolated VM; consider gVisor/Firecracker/rootless Docker |
-| Dependency install has network access | Medium | scripts are disabled, but malicious packages can still read the workspace and call out during install |
-| OAuth `repo` scope is broad | Medium | move to a GitHub App with fine-grained permissions |
-| Redaction is pattern-based | Medium | unusual secret formats can slip through; sensitive-file exclusion and the "remaining secret" re-scan reduce, not remove, the risk |
-| Prompt injection is mitigated, not solved | Medium | defence relies on patch policy + sandbox + human approval |
-| Cloud providers' own retention is outside RepoDoctor's control | Medium | disclosed in the consent text; Self-hosted mode avoids it |
-| JWTs are 1-day, no revocation; password policy minimal | Medium | pre-existing |
-| In-memory rate limiting | Low–Med | per instance; use a shared store before running several API replicas |
-| No token-encryption key rotation | Low–Med | |
-| Test-verified ≠ correct | Inherent | a repository with weak tests can "verify" a bad fix; the report says so and a human approves |
-| Static security scanner is six regexes | Low | pre-existing; not a SAST replacement |
-| No external penetration test or review | — | recommended before launch |
+| Container isolation never executed | High | run `npm run test:docker` on the sandbox host / CI; prefer gVisor or rootless; see `OPERATIONS_SECURITY.md` §15 |
+| `prisma migrate deploy/diff` never run; tests used the pg driver adapter, not the native engine | High | CI `migrations` job; rehearse on a restored backup |
+| Edited an already-dated migration (`20261031000000`) | Medium | checksum caveat and resolution in `DEPLOYMENT.md` §2a |
+| GitHub semantics only emulated | Medium | staging run against a throw-away repository |
+| Install container has network access; registry packages are trusted at install time | Medium | `REPAIR_INSTALL_NETWORK=none` with an offline cache removes it |
+| Actions pinned to tags, not SHAs | Low–Med | SHAs could not be verified offline; Dependabot updates tags |
+| `production` environment reviewers are a GitHub setting | Medium | not enforceable from the repo |
+| Prompt injection and redaction are mitigations | Medium | cannot be proven |
+| OAuth `repo` scope broad; 1-day JWTs without revocation; in-memory rate limits | Medium | pre-existing |
+| No external penetration test | — | recommended |
 
-## Suggested order to close the gaps
+## To reach "production candidate"
 
-1. Push to a branch and get CI green (migrations, tests with Docker, client, Trivy, audit).
-2. Stand up staging: PostgreSQL, Redis, API, scan worker; then a sandbox VM with the repair worker; connect a throw-away GitHub repo; walk through the seven acceptance steps.
-3. Kill the repair worker mid-job and mid-publish; confirm recovery and notifications.
-4. Fix whatever (1)–(3) uncover, then commission an external review.
+1. CI green on a branch with the integration job (real Postgres/Redis/**Docker**, nothing skipped) and the `migrations` job (`migrate deploy` + `migrate diff`).
+2. Staging: sandbox VM with gVisor, `npm run test:docker` passing, one end-to-end run (webhook → scan → approve → PR) on a throw-away GitHub repository, kill the repair worker mid-publish and confirm recovery.
+3. Upgrade rehearsal per `DEPLOYMENT.md` §2a on a restored production backup.
+4. External review.

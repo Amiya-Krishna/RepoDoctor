@@ -84,10 +84,11 @@ Do not run `prisma migrate reset` against data that must be kept. Before applyin
 | OAuth CSRF state | `github.controller.ts` | Implemented | signed JWT, 10 min, HttpOnly cookie match |
 | Webhook HMAC | `github/github-webhook.signature.ts` | Implemented | `npm run test:webhook-signature`  |
 | API rate limiting | `middleware/rate-limit.middleware.ts`, `app.ts` | Implemented (loads in `npm run test:app`) | in-memory store; set `TRUST_PROXY=1` behind a reverse proxy (Compose does) |
-| GitHub token encryption at rest | `security/token-encryption.ts` | Implemented, **mandatory** | AES-256-GCM. Saving a token without `GITHUB_TOKEN_ENCRYPTION_KEY` throws; production startup refuses to run without the key. Legacy plaintext values still read until `npm run tokens:migrate`. No key rotation yet. |
+| GitHub token encryption at rest | `security/token-encryption.ts`, `security/token-migration.ts` | Implemented, **mandatory** | AES-256-GCM, versioned `v1:<keyId>:<iv>:<tag>:<ct>` with the key id bound as AAD. Saving without a key throws. Production never reads plaintext and the API and both workers refuse to start while any stored token is plaintext or unreadable. Rotation via `GITHUB_TOKEN_ENCRYPTION_OLD_KEYS` + `tokens:migrate --rotate` (section 12). |
 | Token kept out of containers | repair worker, runner | Implemented | Docker receives only `REPO_DOCTOR_ATTEMPT` |
 | Token kept out of URLs/args | ingestion, worker, PR service | Implemented |  Via `GIT_CONFIG_*` environment |
-| Sandboxed test execution | `execution/docker.runner.ts` | Implemented | `--network none`, 512 MB, 1 CPU, 128 PIDs, `--cap-drop ALL`, `no-new-privileges`, read-only root, `noexec` tmpfs, 120 s timeout; workspace bind-mounted read-write; no `--user`; no seccomp/AppArmor profile specified |
+| Sandboxed test execution | `execution/docker.runner.ts`, `docker.args.ts`, `safe-path.ts`, `sandbox-config.ts` | Implemented; **container behaviour not verified in the build environment** (no Docker daemon, 9 tests skipped) | `--network none`, memory (no swap)/CPU/PID/file limits, `--cap-drop ALL`, `no-new-privileges`, read-only root, `noexec` tmpfs, non-root numeric user (root is refused), optional `--runtime runsc`; workspace is scanned first and refused if it contains symlinks leaving it, FIFOs/devices or absurd size. Default seccomp profile only. |
+| Dependency-install policy | `execution/install-policy.ts`, `docker.dependencies.ts` | Implemented (unit-tested; install container itself not run here) | refuses git/URL/file/link dependencies, overrides pointing off-registry, `.npmrc`/`.yarnrc*`/`.pnpmfile*`, and lockfile `resolved` hosts other than the npm/yarn registries; lifecycle scripts off; install container is non-root, read-only, capability-less and resource-limited |
 | Command allow-listing | `security/test-command-policy.ts` | Implemented | strict allowlist (`npm/pnpm test`, `run test|lint|typecheck|build`, `node [--check|--test] <file>`); `node -e`, `npx`, shells refused; enforced at the API and again in the worker |
 | Patch validation | `repair/patch-policy.ts`, `repair/repair.patch.ts` | Implemented | path escape, CI/git/credential/manifest paths, symlinks, file/size caps, secrets and dangerous constructs in added code; DELETE now verifies the text it removes |
 | Bounded retries | `retry.policy.ts` | Implemented | 3 attempts; queue-level attempts 1 |
@@ -158,7 +159,7 @@ Known limitations:
 
 Closed in code: token encryption wired and mandatory; Docker result enforced independently of the model and re-run before publishing; strict command policy; audit service; replay protection; cross-user checks; startup validation; approval-gated pull requests; deletion and retention controls.
 
-Still open before a public launch (see `PRODUCTION_READINESS_REPORT.md`): run the stack end to end with a real database, Redis and Docker daemon; run the Docker-backed isolation tests on a real sandbox host; TLS in front of the client; GitHub App for fine-grained permissions; shared rate-limit store for multiple API replicas; token key rotation; external security review.
+Still open before a public launch (see `PRODUCTION_READINESS_REPORT.md` for the evidence-based status): run the Docker-backed isolation tests on a real sandbox host (`npm run test:docker`); run `prisma migrate deploy`/`migrate diff` (blocked in the build environment); exercise a real GitHub App/OAuth repository; TLS in front of the client; GitHub App for fine-grained permissions; shared rate-limit store for multiple API replicas; external security review.
 
 ## 8. Failure triage
 
@@ -175,3 +176,85 @@ Still open before a public launch (see `PRODUCTION_READINESS_REPORT.md`): run th
 ## 9. Operational release gate
 
 Do not deploy publicly until the blockers in section 7 are closed and recorded with evidence.
+
+## 10. Privacy, consent and audit
+
+- **Per-request consent.** Every leaf AI provider is wrapped in a guard (`ai/guarded.provider.ts`). Immediately before each outbound call — including every retry and every fallback — the guard re-reads the user's privacy settings from the database and re-runs the egress policy. A mode change, withdrawn consent or an expired consent stops the next request and aborts one already in flight (its result is discarded and never returned to the pipeline). Errors are `MODE_CHANGED`, `CONSENT_EXPIRED`, `CONSENT_MISSING`, `CONSENT_OUTDATED`, …; a `PrivacyPolicyError` is never retried and never falls back to another provider.
+- **Atomic settings + audit.** A settings change and its audit event are written in one database transaction; if the audit row cannot be written the change does not happen. `SecurityAuditEvent` is append-only at the database level: a trigger rejects every UPDATE and any DELETE of a row younger than 365 days (the retention purge may remove older rows).
+- **What is logged.** Metadata only (event type, outcome, actor, repository, counts, hashes). Never source code, prompts, tokens or secrets; `sanitizeDetails` strips them before storage.
+- **Audit history.** Users can read their own events (`GET /api/privacy/audit?limit=&cursor=`, newest first, never another user's).
+
+## 11. Webhook lifecycle (durable acceptance)
+
+GitHub does **not** redeliver failed deliveries automatically, so durability has to come from our database: a delivery is acknowledged as queued only once it is recoverable.
+
+`PENDING → PROCESSING → QUEUED` (terminal: `IGNORED`, `FAILED_PERMANENT`; `FAILED_RETRYABLE` re-enters the sweep).
+
+1. The signature is verified over the raw body, then the delivery id is recorded (`WebhookDelivery`) together with one `WebhookScanOutbox` row per target repository in a single transaction. If that write fails the endpoint returns 503 and nothing is queued, so GitHub's UI shows the failure and it can be redelivered.
+2. A compare-and-set claim with a lease moves the delivery to `PROCESSING`; only one worker can hold it.
+3. Each outbox row is enqueued with the deterministic BullMQ job id `github-<delivery>-<repo>`; adding an existing id is a no-op, so a crash between "enqueue" and "mark queued" cannot create duplicates.
+4. A recovery loop in the scan worker re-claims deliveries whose lease expired or that are `FAILED_RETRYABLE`, with backoff and an attempt cap (then `FAILED_PERMANENT`, audited).
+5. A replayed delivery id is rejected; terminal rows are purged after `WEBHOOK_RETENTION_DAYS` (default 30).
+
+Operator view: `SELECT status, count(*) FROM "WebhookDelivery" GROUP BY 1;` Alert on any `FAILED_PERMANENT` and on `PENDING`/`PROCESSING` rows older than a few minutes.
+
+## 12. GitHub token encryption and rotation
+
+Stored format: `v1:<keyId>:<iv>:<tag>:<ciphertext>` (AES-256-GCM, base64url, key id as AAD). Legacy formats still recognised: `<iv>.<tag>.<ct>` (GCM under the current key) and bare plaintext.
+
+- **Startup gate.** The API and both workers call `assertTokenStoreSecure()`. In production they refuse to start if the key is missing/invalid/low-entropy, or if any stored token is plaintext or unrecognisable. Messages contain counts only.
+- **Upgrade (plaintext/legacy → v1).** Back up the database, then `npm run tokens:migrate -- --dry-run`, then `npm run tokens:migrate -- --i-have-a-backup` (in a container image: `npm run tokens:migrate:dist`). Each row is encrypted, decrypted back and compared, written with a compare-and-set, re-read and verified; if the post-write check fails or throws the original value is restored. Nothing is deleted or nulled; unreadable rows are reported by id and left untouched. Idempotent.
+- **Rotate the key.** (1) Generate a new key and a new id. (2) Set `GITHUB_TOKEN_ENCRYPTION_KEY`/`_KEY_ID` to the new pair and move the old pair into `GITHUB_TOKEN_ENCRYPTION_OLD_KEYS=k1:<oldkey>`. (3) Deploy. (4) Back up, then `npm run tokens:migrate -- --rotate --i-have-a-backup`. (5) When the scan shows nothing under the old id, remove it from the old-keys list. Retired keys only decrypt; they are never used to encrypt.
+- **Lost key.** Tokens cannot be recovered; users reconnect GitHub. Do not delete rows to "fix" the startup gate.
+
+## 13. Pull-request publication, approval and recovery
+
+`AWAITING_APPROVAL → APPROVED → REVALIDATING → TESTING → BRANCH_PUSHED → PR_CREATED → COMPLETED`, plus `NEEDS_REAPPROVAL`, `APPROVAL_REVOKED`, `PUBLISH_FAILED_RETRYABLE`, `PUBLISH_BLOCKED`.
+
+- **Approval is bound** to the SHA-256 of the exact stored patch and to the repository base commit recorded when the patch was verified. The client sends the hash it displayed; a mismatch is refused with `409 PATCH_CHANGED`. Approving twice: one request wins, the other gets 409.
+- **Before pushing**, the worker re-checks the owner's authorization and push access, that the approval still exists (revocation after approval is honoured until the branch is pushed), re-applies the patch to a fresh clone, and re-runs the tests. If the base branch moved, a file the patch touches changed → `NEEDS_REAPPROVAL`; only unrelated files changed → revalidate and continue.
+- **Idempotent and crash-safe.** Every transition is a persisted compare-and-set with a lease. The branch name is deterministic (`repodoctor/fix-<patch-hash prefix>`). Position is re-derived from persisted state **and remote truth**: an existing remote branch with the identical tree is reused, a different tree blocks (never force-pushed, never overwritten), an existing open/closed/merged PR for the branch is reused and reported as such. Publish queue job ids carry a generation so a recovery re-queue is not swallowed by an old completed job.
+- **Recovery.** `recoverStaleRepairJobs` runs in the repair worker: orphaned `RUNNING` loops become `INTERRUPTED`; lost approvals and expired publication leases are re-queued; after 5 attempts the job becomes `PUBLISH_BLOCKED` and the owner is told whether a branch exists on GitHub.
+- **Never auto-merge.** There is no merge code path. Notifications say exactly what exists (nothing pushed / branch exists without PR / PR link).
+
+## 14. Retention and deletion
+
+- Per-user `retentionDays` (default 30, max 365). A daily purge deletes analyses older than the cutoff and everything hanging off them (including tables that store only the analysis id as text), except analyses with a repair still waiting for the owner's decision or publishing.
+- Notifications: 90 days. Webhook deliveries: `WEBHOOK_RETENTION_DAYS`. Audit events: 365 days (also the database trigger's floor).
+- "Delete my data" removes every analysis, patch, test output, repair record, memory chunk and notification, withdraws the GitHub token and consent; "delete account" also removes the user. The deletion request is audited first (fail closed) and the completion record is written in the same transaction as the deletion. Audit rows are kept for their retention period even after account deletion.
+- Backups are outside RepoDoctor's control: deleted data persists in database backups until they expire; set backup retention accordingly.
+
+## 15. Sandbox boundary evaluation
+
+What isolates untrusted repository code, honestly:
+
+| Layer | Protects against | Does not protect against |
+|---|---|---|
+| Docker default (runc) with the flags above | accidental damage, most casual escapes, network exfiltration at test time, resource exhaustion | kernel/runc vulnerabilities: a container shares the host kernel. Flags alone are **not** an isolation guarantee. |
+| gVisor (`REPAIR_SANDBOX_RUNTIME=runsc`) | a large class of kernel-exploit escapes (syscalls are served by a user-space kernel) | some syscalls/features are unsupported, so a few repositories' tests may fail; performance cost; gVisor bugs |
+| Rootless Docker/Podman on the sandbox host | a successful escape lands as an unprivileged user, not root | still the same kernel; slightly different networking/volume behaviour |
+| Dedicated VM, no secrets, egress allow-list (169.254.169.254 blocked) | blast radius of any escape | an attacker with an escape and the host's own credentials, if any |
+| Firecracker/Kata micro-VMs | strongest option (hardware virtualisation per job) | needs operator infrastructure not provided here |
+
+Recommendation: dedicated VM **plus** gVisor (`runsc`) as the default for any deployment that processes repositories from people you do not know; set `REPAIR_REQUIRE_HARDENED_RUNTIME=true` to make that mandatory. This was evaluated by design review; gVisor was **not** installed or exercised in the build environment.
+
+The dependency-install step is the only one with network access. It is non-root, capability-less and read-only, scripts are disabled, and `install-policy.ts` rejects repositories whose manifests/lockfiles point at hosts other than the npm/yarn registries; set `REPAIR_INSTALL_NETWORK=none` if you pre-seed an offline cache. A malicious *registry* package can still read the workspace during install and phone home: treat the install container as part of the untrusted zone.
+
+## 16. Monitoring and incident response
+
+Alert on: `/api/ready` false; Redis queue backlog; `WebhookDelivery` rows `FAILED_PERMANENT` or stuck `PENDING/PROCESSING`; `RepairJob` rows stuck in a publication stage; audit events `AI_EGRESS_BLOCKED`, `WEBHOOK_REJECTED`, `AUTHZ_DENIED`, `PR_BLOCKED` spikes; token-store gate failures at startup.
+
+| Incident | Immediate actions |
+|---|---|
+| Suspected encryption-key leak | rotate per section 12; ask affected users to reconnect GitHub (revoking the OAuth grant on GitHub invalidates the token regardless of our key) |
+| Suspected sandbox escape | isolate and destroy the sandbox VM; rotate every credential it could reach; review `repodoctor.sandbox` containers and volumes; do not reuse the host |
+| Webhook secret leak | rotate `GITHUB_WEBHOOK_SECRET` in both places; inspect `WEBHOOK_REJECTED` and recent deliveries |
+| Unwanted branch/PR created | confirm via `RepairJob.branchName/pullRequestNumber` and the `PR_APPROVED` audit event (patch hash); close the PR; RepoDoctor never merges |
+| Data-subject deletion request | use the in-app deletion; then confirm no rows remain; note backup retention |
+
+## 17. Known limitations
+
+- Prisma's engines could not be downloaded where this was built: tests ran against real PostgreSQL through the pure-JS `pg` driver adapter (`PRISMA_DRIVER_ADAPTER=pg`, client generated engine-free), **not** the native query engine; `prisma migrate deploy` and `prisma migrate diff` were not run there (CI runs them).
+- GitHub behaviour was exercised against a local fake of the REST endpoints used and a local bare git repository, not github.com.
+- Real-container isolation tests need a Docker daemon; they skip (visibly) without one and fail with `REQUIRE_DOCKER_TESTS=true`.
+- Redaction and prompt-injection defences are mitigations, not guarantees.

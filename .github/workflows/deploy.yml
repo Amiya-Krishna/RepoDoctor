@@ -1,48 +1,144 @@
 name: Release images
 
-# Builds, scans and publishes versioned images. Rolling them out to a host is
-# operator-specific and intentionally not automated here (see docs/DEPLOYMENT.md).
-# The `production` environment must be configured in GitHub with required
-# reviewers; the job pauses until a reviewer approves it.
+# Builds, scans and publishes versioned images. Rolling them out to a host is operator-specific and
+# intentionally not automated here (see docs/DEPLOYMENT.md).
+#
+# Controls:
+#  - Only a tagged-SemVer input is accepted; it is passed through env, never interpolated into a script.
+#  - Tests (backend, integration, migrations, docker isolation, client) must pass on the exact commit first.
+#  - BOTH images are built and scanned with Trivy BEFORE anything is pushed.
+#  - Publishing runs in the `production` environment, which must have required reviewers configured in GitHub
+#    (repository setting; it cannot be enforced from this file).
+#  - Third-party actions are pinned to release tags. Pinning to commit SHAs is recommended and tracked in
+#    docs/PRODUCTION_READINESS_REPORT.md; Dependabot keeps the tags current.
+#  - Images are never deployed or auto-rolled-out from here, and nothing is merged automatically.
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Image tag, e.g. 1.4.0"
+        description: "SemVer image tag without a leading v, e.g. 1.4.0 or 1.4.0-rc.1"
         required: true
+        type: string
 
 permissions:
   contents: read
-  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
 
 jobs:
-  publish:
+  validate:
+    name: Validate release request
     runs-on: ubuntu-latest
-    # Environment names must exist in the repository settings before they can be
-    # referenced here. Keep this job unscoped until the required environment is
-    # created in GitHub.
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - name: Validate version input
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if ! printf '%s' "$INPUT_VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'; then
+            echo "version must be SemVer such as 1.4.0 or 1.4.0-rc.1" >&2
+            exit 1
+          fi
+          echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Server, integration and client tests
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_ADMIN_URL: postgresql://postgres:ci@localhost:5432/postgres
+      TEST_REDIS_URL: redis://localhost:6379
+      REQUIRE_DOCKER_TESTS: "true"
+      REQUIRE_INTEGRATION_TESTS: "true"
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Pull sandbox image
+        run: docker pull node:22-bookworm-slim
+      - name: Server
+        working-directory: server
+        run: |
+          npm ci
+          npx prisma generate
+          npm run typecheck
+          npm test
+          npm run build
+      - name: Client
+        working-directory: client
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+
+  publish:
+    name: Build, scan, then publish
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build images (not pushed yet)
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          IMAGE="${REGISTRY}/$(printf '%s' "$REPO" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          docker build -t "$IMAGE-server:$VERSION" server
+          docker build -t "$IMAGE-client:$VERSION" client
+      - name: Scan server image (fails on HIGH/CRITICAL with a fix available)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}-server:${{ needs.validate.outputs.version }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Scan client image (fails on HIGH/CRITICAL with a fix available)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}-client:${{ needs.validate.outputs.version }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build
+      - name: Push (only reached when both scans passed)
         run: |
-          IMAGE=ghcr.io/${{ github.repository }}
-          docker build -t $IMAGE-server:${{ inputs.version }} server
-          docker build -t $IMAGE-client:${{ inputs.version }} client
-      - name: Scan before publishing (fails on HIGH/CRITICAL with a fix available)
-        uses: aquasecurity/trivy-action@v0.28.0
-        with:
-          image-ref: ghcr.io/${{ github.repository }}-server:${{ inputs.version }}
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-      - name: Push
-        run: |
-          IMAGE=ghcr.io/${{ github.repository }}
-          docker push $IMAGE-server:${{ inputs.version }}
-          docker push $IMAGE-client:${{ inputs.version }}
+          docker push "$IMAGE-server:$VERSION"
+          docker push "$IMAGE-client:$VERSION"
