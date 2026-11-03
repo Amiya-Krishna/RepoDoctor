@@ -12,3 +12,4 @@ coverage/
 bug-test-repo/
 security-test-repo/
 test-generation-repo/
+server/.local-prisma/

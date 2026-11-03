@@ -412,27 +412,25 @@ Configuration notes: `JWT_EXPIRES_IN` is digits plus `s`/`m`/`h`/`d` (invalid va
 ## Testing
 
 ```bash
-# Server (from server/). Scripts that need nothing else (verified, exit 0):
-npm run test:webhook-signature
-npm run test:static-security
-npm run test:risk-engine
-npm run test:benchmark
-npm run test:verification-gate
-npm run test:security
-# Scripts that import Prisma need a generated client (`npx prisma generate`); some also need services:
-#   test:app (Redis), test:scan-queue / test:repair-queue (Redis; export REDIS_PASSWORD first, the scripts do not read server/.env)
-#   test:auth, test:rag (database; they WRITE to DATABASE_URL, so point it at a Neon branch or a throwaway database)
-# Scripts that take an argument: npm run test:context -- <repo-path>, npm run test:docker-runner -- <repo-path>
-npx tsc --noEmit && npm run build    # needs the generated Prisma client
+# Server (from server/). Unit tests need nothing; integration tests need a real PostgreSQL (role with CREATEDB) and Redis:
+export TEST_DATABASE_ADMIN_URL=postgresql://postgres@127.0.0.1:5432/postgres
+export TEST_REDIS_URL=redis://:password@127.0.0.1:6379
+npm test                      # tsx --test src/tests/*.test.ts; unavailable infrastructure is reported as SKIPPED with the reason
+REQUIRE_INTEGRATION_TESTS=true REQUIRE_DOCKER_TESTS=true npm test   # missing Postgres/Redis/Docker FAILS instead of skipping (CI does this)
+npm run test:docker           # real-container isolation tests (needs Docker + `docker pull node:22-bookworm-slim`)
+npm run typecheck && npm run build
+
 # Client (from client/)
+npm test                      # component tests (vitest)
 npm run lint && npm run build
+npx playwright install chromium   # first time
+npm run preview -- --port 8080 --host 127.0.0.1 &  E2E_BASE_URL=http://127.0.0.1:8080 npx playwright test e2e/privacy-flow.spec.ts
+
 # Compose file (root .env and server/.env must exist)
 docker compose config -q
-# Browser end-to-end for registration/login (needs a running API + client; first time: npx playwright install chromium)
-npm run test:e2e                     # E2E_BASE_URL overrides the client URL (default http://localhost:8080, the same for Compose and `npm run dev`)
 ```
 
-The full list of `test:*` scripts is in `server/package.json` (many call AI providers or GitHub and need real credentials). Step-by-step manual checks are in the [manual testing guide](docs/MANUAL_TESTING_GUIDE.md).
+What each suite covers is listed in `docs/PRODUCTION_READINESS_REPORT.md`. Older ad-hoc scripts (`npm run test:security`, `test:webhook-signature`, `test:static-security`, `test:verification-gate`) still run without services; those that import Prisma need `npx prisma generate`.
 
 ## Troubleshooting
 
@@ -489,7 +487,9 @@ Docker volumes left behind by an interrupted run can be removed with `docker vol
 
 1. [Architecture](docs/ARCHITECTURE.md) — reference diagram, stack, API surface, flows, trust boundaries.
 2. [Operations and security](docs/OPERATIONS_SECURITY.md) — environment variables, security controls, Compose deployment, failure triage.
-3. [Manual testing guide](docs/MANUAL_TESTING_GUIDE.md) — setup and functional test cases.
+3. [Deployment](docs/DEPLOYMENT.md) and [database migrations](docs/DATABASE_MIGRATIONS.md) — upgrade order, backup/restore, sandbox host.
+3a. [Production readiness report](docs/PRODUCTION_READINESS_REPORT.md) — what was verified, how, and what is not.
+3b. [Manual testing guide](docs/MANUAL_TESTING_GUIDE.md) — setup and functional test cases.
 4. [Development history](docs/DEVELOPMENT_HISTORY.md) — day-by-day development log of the 30-day plan.
 5. [Server](server/README.md) and [client](client/README.md) notes.
 
