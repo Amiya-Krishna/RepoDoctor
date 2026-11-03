@@ -11,5 +11,6 @@ export const createManualTestProvider = (): AIProvider => {
     throw new Error("Manual AI scripts send fixture code to the configured model. Set REPODOCTOR_ALLOW_MANUAL_AI=1 to proceed.");
   }
   const mode = process.env.LOCAL_AI_BASE_URL && process.env.LOCAL_AI_MODEL ? "LOCAL" : "CLOUD";
-  return createAIProvider({ mode, onEgress: () => undefined });
+  // Explicit opt-in above is the consent here: fixture repositories only, no user data.
+  return createAIProvider({ mode, onEgress: () => undefined, authorize: async () => undefined });
 };

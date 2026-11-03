@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Queue } from "bullmq";
 import { redisConnection } from "./scan.queue.js";
+import { publishQueueJobId } from "../repair/repair-guard.js";
 
 export const REPAIR_QUEUE_NAME = "autonomous-repair";
 
@@ -76,9 +77,9 @@ export const publishQueue = new Queue<PublishJobData, { status: string; pullRequ
   {
     connection: redisConnection,
     defaultJobOptions: {
-      // Publication is guarded by an atomic APPROVED -> PUBLISHING transition and a
-      // unique (analysis, finding) pull request row, so a redelivery is harmless;
-      // automatic retries are not used because a half-finished push needs a human.
+      // Publication is guarded by persisted compare-and-set transitions, a lease, a unique
+      // (analysis, finding) pull request row and remote-state checks, so a redelivery is harmless.
+      // Retries come from the recovery sweep (bounded), not from BullMQ.
       attempts: 1,
       removeOnComplete: { age: 86_400, count: 2_000 },
       removeOnFail: { age: 7 * 86_400, count: 5_000 },
@@ -86,9 +87,10 @@ export const publishQueue = new Queue<PublishJobData, { status: string; pullRequ
   },
 );
 
-export async function queuePublish(data: PublishJobData) {
-  // Deterministic id: a double-click or retried HTTP request enqueues once.
-  const job = await publishQueue.add("publish", data, { jobId: `publish-${data.repairJobId}` });
+export async function queuePublish(data: PublishJobData, generation = 0) {
+  // Deterministic id per (repair, generation): a double-click or retried HTTP request enqueues once, while a
+  // recovery attempt uses the next generation (BullMQ refuses to re-add an id it still retains).
+  const job = await publishQueue.add("publish", data, { jobId: publishQueueJobId(data.repairJobId, generation) });
   return { jobId: String(job.id) };
 }
 

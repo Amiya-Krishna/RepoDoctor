@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Queue } from "bullmq";
+import { Queue, type ConnectionOptions } from "bullmq";
 
 export const SCAN_QUEUE_NAME = "repository-scan";
 
@@ -37,26 +37,37 @@ export const redisConnection = {
   maxRetriesPerRequest: null,
 };
 
-export const scanQueue = new Queue<
-  RepositoryScanJobData,
-  RepositoryScanResult,
-  "scan"
->(SCAN_QUEUE_NAME, {
-  connection: redisConnection,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: "exponential", delay: 2_000 },
-    removeOnComplete: { age: 86_400, count: 2_000 },
-    removeOnFail: { age: 7 * 86_400, count: 5_000 },
-  },
-});
+/**
+ * Factory so tests (and the webhook recovery loop) can point at another
+ * connection or a unique key prefix. Production uses the default `scanQueue`.
+ */
+export const createScanQueue = (options: { connection?: ConnectionOptions; prefix?: string } = {}) =>
+  new Queue<RepositoryScanJobData, RepositoryScanResult, "scan">(SCAN_QUEUE_NAME, {
+    connection: options.connection ?? redisConnection,
+    ...(options.prefix ? { prefix: options.prefix } : {}),
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: "exponential", delay: 2_000 },
+      removeOnComplete: { age: 86_400, count: 2_000 },
+      removeOnFail: { age: 7 * 86_400, count: 5_000 },
+    },
+  });
 
+export type ScanQueue = ReturnType<typeof createScanQueue>;
+
+export const scanQueue: ScanQueue = createScanQueue();
+
+/**
+ * With an explicit jobId BullMQ's `add` is idempotent: if a job with that id
+ * already exists the existing job is returned and nothing is enqueued twice.
+ */
 export async function queueRepositoryScan(
   data: RepositoryScanJobData,
   jobId?: string,
+  queue: ScanQueue = scanQueue,
 ) {
   const safeJobId = jobId ?? `manual-${randomUUID()}`;
-  const job = await scanQueue.add("scan", data, { jobId: safeJobId });
+  const job = await queue.add("scan", data, { jobId: safeJobId });
   return { jobId: String(job.id), job };
 }
 

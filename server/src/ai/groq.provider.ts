@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 
-import type { AIProvider } from "./ai.provider.js";
+import type { AIProvider, AIRequestOptions } from "./ai.provider.js";
 
 import { aiConfig } from "./ai.config.js";
 import { envPositiveInt } from "../config/env-number.js";
@@ -22,9 +22,12 @@ export class GroqProvider implements AIProvider {
     });
   }
 
+  readonly providerName = "groq";
+
   async generate(
     systemPrompt: string,
-    userPrompt: string
+    userPrompt: string,
+    options?: AIRequestOptions
   ): Promise<string> {
     const response =
       await this.client.chat.completions.create({
@@ -39,7 +42,7 @@ export class GroqProvider implements AIProvider {
             content: userPrompt,
           },
         ],
-      });
+      }, { signal: options?.signal });
 
     return response.choices[0]?.message?.content ?? "";
   }
@@ -47,7 +50,8 @@ export class GroqProvider implements AIProvider {
   async generateStructured<T>(
     systemPrompt: string,
     userPrompt: string,
-    schema: Record<string, unknown>
+    schema: Record<string, unknown>,
+    options?: AIRequestOptions
   ): Promise<T> {
     const response =
       await this.client.chat.completions.create({
@@ -72,7 +76,7 @@ export class GroqProvider implements AIProvider {
             schema,
           },
         },
-      });
+      }, { signal: options?.signal });
 
     const content =
       response.choices[0]?.message?.content;

@@ -12,6 +12,11 @@ export interface ProviderRequest {
   /** Result of evaluateAIEgress(); there is deliberately no way to build a provider without one. */
   mode: "CLOUD" | "LOCAL";
   onEgress: (record: EgressRecord) => Promise<void> | void;
+  /** Fresh consent check run before EVERY model call (see GuardedProviderOptions.authorize). */
+  authorize: (mode: "CLOUD" | "LOCAL") => Promise<void>;
+  recheckMs?: number;
+  /** Test seam: replaces the real leaf providers. Never used in production code paths. */
+  leafProviders?: AIProvider[];
 }
 
 /**
@@ -19,23 +24,31 @@ export interface ProviderRequest {
  * LOCAL: the self-hosted endpoint only. There is no fallback from LOCAL to
  * CLOUD, so a user who chose self-hosted never leaks to a third party.
  *
- * The result is always wrapped in GuardedAIProvider (redaction, size limit,
- * audit hook). Callers obtain `mode` from the privacy service, which fails
- * closed when consent is missing.
+ * EVERY leaf provider is wrapped in its own GuardedAIProvider, so redaction, the secret re-scan,
+ * the size limit, a fresh consent check and the audit record happen for each actual model call:
+ * including each transient retry and each fallback to the next provider inside the manager.
  */
 export const createAIProvider = (request: ProviderRequest): AIProvider => {
-  const providers: AIProvider[] = [];
+  const leaves: AIProvider[] = [];
 
-  if (request.mode === "LOCAL") {
-    providers.push(new LocalProvider());
+  if (request.leafProviders) {
+    leaves.push(...request.leafProviders);
+  } else if (request.mode === "LOCAL") {
+    leaves.push(new LocalProvider());
   } else {
-    if (isProviderConfigured.openrouter()) providers.push(new OpenRouterProvider());
-    if (isProviderConfigured.groq()) providers.push(new GroqProvider());
-    if (isProviderConfigured.gemini()) providers.push(new GeminiProvider());
+    if (isProviderConfigured.openrouter()) leaves.push(new OpenRouterProvider());
+    if (isProviderConfigured.groq()) leaves.push(new GroqProvider());
+    if (isProviderConfigured.gemini()) leaves.push(new GeminiProvider());
   }
 
-  return new GuardedAIProvider(new AIProviderManager(providers), {
-    mode: request.mode,
-    onEgress: request.onEgress,
-  });
+  const guarded = leaves.map(
+    (leaf) =>
+      new GuardedAIProvider(leaf, {
+        mode: request.mode,
+        onEgress: request.onEgress,
+        authorize: request.authorize,
+        recheckMs: request.recheckMs,
+      }),
+  );
+  return new AIProviderManager(guarded);
 };

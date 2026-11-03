@@ -3,27 +3,22 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { createWebhookHandler, type WebhookDeps } from "../controllers/github-webhook.controller.js";
 import { verifyGitHubWebhookSignature } from "../github/github-webhook.signature.js";
-import { claimDelivery, type DeliveryStore } from "../github/webhook-replay.js";
+import { createMemoryWebhookStore, type WebhookStore } from "../github/webhook-store.js";
 import { captureAudit, mockReq, mockRes } from "./helpers.js";
 
 const SECRET = "test-webhook-secret-0123456789";
 const sign = (b: Buffer, s = SECRET) => "sha256=" + createHmac("sha256", s).update(b).digest("hex");
 
-function memoryDeliveries(): DeliveryStore & { seen: Set<string> } {
-  const seen = new Set<string>();
-  return { seen, async claim(id) { if (seen.has(id)) return false; seen.add(id); return true; } };
-}
-
 function setup(over: Partial<WebhookDeps> = {}) {
   const queued: string[] = [];
-  const deliveries = memoryDeliveries();
+  const store = createMemoryWebhookStore();
   const deps: WebhookDeps = {
-    deliveries,
+    store,
     findAutoScanRepositories: async () => [{ id: "repoA", userId: "u1" }, { id: "repoB", userId: "u2" }],
-    queueScan: async (_d, jobId) => { queued.push(jobId); return { jobId }; },
+    enqueue: async (_d, jobId) => { queued.push(jobId); return { jobId }; },
     ...over,
   };
-  return { handler: createWebhookHandler(deps), queued, deliveries };
+  return { handler: createWebhookHandler(deps), queued, deliveries: { seen: { get size() { return store.deliveries.size; } } }, store };
 }
 
 const push = (extra: object = {}) => Buffer.from(JSON.stringify({ ref: "refs/heads/main", repository: { id: 42 }, ...extra }));
@@ -72,11 +67,13 @@ test("a captured, correctly signed delivery cannot be replayed", async () => {
   const second = await call(handler, body);
   assert.equal(second.statusCode, 200);
   assert.equal((second.body as any).accepted, false);
+  assert.equal((second.body as any).state, "QUEUED");
   assert.equal(queued.length, jobsAfterFirst, "no additional jobs");
 });
 
 test("if the replay store is down, the webhook fails closed (503) and queues nothing", async () => {
-  const { handler, queued } = setup({ deliveries: { claim: async () => { throw new Error("db down"); } } });
+  const broken: WebhookStore = { ...createMemoryWebhookStore(), get: async () => { throw new Error("db down"); } };
+  const { handler, queued } = setup({ store: broken });
   assert.equal((await call(handler, push())).statusCode, 503);
   assert.equal(queued.length, 0);
 });
@@ -102,11 +99,4 @@ test("accepted push queues one scan per opted-in repository, with per-repository
   const { handler, queued } = setup();
   await call(handler, push(), { delivery: "44444444-0000-0000-0000-000000000004" });
   assert.deepEqual(queued, ["github-44444444-0000-0000-0000-000000000004-repoA", "github-44444444-0000-0000-0000-000000000004-repoB"]);
-});
-
-test("claimDelivery: new, replay, invalid", async () => {
-  const s = memoryDeliveries();
-  assert.equal(await claimDelivery(s, "abcdef12-3456", "push"), "new");
-  assert.equal(await claimDelivery(s, "abcdef12-3456", "push"), "replay");
-  assert.equal(await claimDelivery(s, "../etc", "push"), "invalid");
 });

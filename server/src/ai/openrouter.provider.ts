@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 
-import type { AIProvider } from "./ai.provider.js";
+import type { AIProvider, AIRequestOptions } from "./ai.provider.js";
 import { aiConfig } from "./ai.config.js";
 
 export class OpenRouterProvider implements AIProvider {
@@ -23,9 +23,12 @@ export class OpenRouterProvider implements AIProvider {
     });
   }
 
+  readonly providerName = "openrouter";
+
   async generate(
     systemPrompt: string,
-    userPrompt: string
+    userPrompt: string,
+    options?: AIRequestOptions
   ): Promise<string> {
     try {
       const response =
@@ -42,7 +45,7 @@ export class OpenRouterProvider implements AIProvider {
               content: userPrompt,
             },
           ],
-        });
+        }, { signal: options?.signal });
 
       return response.choices[0]?.message?.content ?? "";
     } catch (error: any) {
@@ -62,7 +65,8 @@ export class OpenRouterProvider implements AIProvider {
   async generateStructured<T>(
     systemPrompt: string,
     userPrompt: string,
-    schema: Record<string, unknown>
+    schema: Record<string, unknown>,
+    options?: AIRequestOptions
   ): Promise<T> {
     try {
       const response =
@@ -94,7 +98,7 @@ export class OpenRouterProvider implements AIProvider {
           // response_format; otherwise the schema is silently ignored and the
           // model returns free text that fails JSON.parse.
           provider: { require_parameters: true },
-        } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
+        } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming, { signal: options?.signal });
 
       const content =
         response.choices[0]?.message?.content;
@@ -117,8 +121,10 @@ export class OpenRouterProvider implements AIProvider {
 
       // 404 "No endpoints found": the routed model cannot honour a strict
       // json_schema. Ask for plain JSON and validate on our side instead.
+      if (options?.signal?.aborted) throw error;
+
       if (status === 404 || status === 400) {
-        return this.generateStructuredFallback<T>(systemPrompt, userPrompt, schema);
+        return this.generateStructuredFallback<T>(systemPrompt, userPrompt, schema, options);
       }
 
       const message =
@@ -135,7 +141,8 @@ export class OpenRouterProvider implements AIProvider {
   private async generateStructuredFallback<T>(
     systemPrompt: string,
     userPrompt: string,
-    schema: Record<string, unknown>
+    schema: Record<string, unknown>,
+    options?: AIRequestOptions
   ): Promise<T> {
     try {
       const response = await this.client.chat.completions.create({
@@ -149,7 +156,7 @@ export class OpenRouterProvider implements AIProvider {
           },
           { role: "user", content: userPrompt },
         ],
-      });
+      }, { signal: options?.signal });
 
       const raw = response.choices[0]?.message?.content ?? "";
       const cleaned = raw

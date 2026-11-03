@@ -48,7 +48,60 @@ ALTER TABLE "Repository" ADD COLUMN "lastScheduledScanAt" TIMESTAMP(3);
 ALTER TABLE "DockerTestRun" ADD COLUMN "analysisId" TEXT;
 CREATE INDEX "DockerTestRun_analysisId_idx" ON "DockerTestRun"("analysisId");
 
--- At most one pull request per finding
+-- At most one pull request per finding.
+--
+-- Installations that already hold several "PullRequest" rows for one
+-- (analysisId, findingId) would fail on the unique index below and be left
+-- half-migrated. So duplicates are resolved first, deterministically and
+-- WITHOUT discarding data: the earliest row (createdAt, then id) is kept and
+-- every other row is copied to "PullRequestDuplicateArchive" (with the id of
+-- the kept row and the reason) before it is removed from "PullRequest".
+-- This whole file runs in one transaction, so it either completes or changes nothing.
+CREATE TABLE "PullRequestDuplicateArchive" (
+    "id" TEXT NOT NULL,
+    "analysisId" TEXT NOT NULL,
+    "findingId" TEXT NOT NULL,
+    "fixProposalId" TEXT NOT NULL,
+    "verificationResultId" TEXT NOT NULL,
+    "repositoryOwner" TEXT NOT NULL,
+    "repositoryName" TEXT NOT NULL,
+    "branchName" TEXT NOT NULL,
+    "baseBranch" TEXT NOT NULL,
+    "commitSha" TEXT NOT NULL,
+    "pullRequestNumber" INTEGER NOT NULL,
+    "pullRequestUrl" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "status" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL,
+    "keptPullRequestId" TEXT NOT NULL,
+    "archivedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "reason" TEXT NOT NULL,
+
+    CONSTRAINT "PullRequestDuplicateArchive_pkey" PRIMARY KEY ("id")
+);
+CREATE INDEX "PullRequestDuplicateArchive_analysisId_findingId_idx" ON "PullRequestDuplicateArchive"("analysisId", "findingId");
+CREATE INDEX "PullRequestDuplicateArchive_keptPullRequestId_idx" ON "PullRequestDuplicateArchive"("keptPullRequestId");
+
+WITH ranked AS (
+    SELECT pr.*,
+           ROW_NUMBER() OVER (PARTITION BY pr."analysisId", pr."findingId" ORDER BY pr."createdAt" ASC, pr."id" ASC) AS rn,
+           FIRST_VALUE(pr."id") OVER (PARTITION BY pr."analysisId", pr."findingId" ORDER BY pr."createdAt" ASC, pr."id" ASC) AS kept_id
+    FROM "PullRequest" pr
+), archived AS (
+    INSERT INTO "PullRequestDuplicateArchive" (
+        "id", "analysisId", "findingId", "fixProposalId", "verificationResultId", "repositoryOwner", "repositoryName",
+        "branchName", "baseBranch", "commitSha", "pullRequestNumber", "pullRequestUrl", "title", "status", "createdAt",
+        "keptPullRequestId", "reason"
+    )
+    SELECT r."id", r."analysisId", r."findingId", r."fixProposalId", r."verificationResultId", r."repositoryOwner", r."repositoryName",
+           r."branchName", r."baseBranch", r."commitSha", r."pullRequestNumber", r."pullRequestUrl", r."title", r."status", r."createdAt",
+           r.kept_id, 'duplicate (analysisId, findingId); earliest createdAt (then lowest id) kept'
+    FROM ranked r
+    WHERE r.rn > 1
+    RETURNING "id"
+)
+DELETE FROM "PullRequest" WHERE "id" IN (SELECT "id" FROM archived);
+
 CREATE UNIQUE INDEX "PullRequest_analysisId_findingId_key" ON "PullRequest"("analysisId", "findingId");
 
 -- Repair approval gate

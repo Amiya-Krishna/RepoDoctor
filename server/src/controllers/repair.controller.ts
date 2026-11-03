@@ -7,8 +7,11 @@ import {
 } from "../queue/repair.queue.js";
 import { validateTestCommand } from "../security/test-command-policy.js";
 import { recordAudit } from "../audit/audit.service.js";
+import { computePatchHash } from "../repair/patch-hash.js";
+import type { FixChange } from "../agents/fix.types.js";
 import {
   ACTIVE_REPAIR_STATUSES,
+  REVOCABLE_STATUSES,
   decideApproval,
   decideRepairRequest,
   repairQueueJobId,
@@ -153,12 +156,14 @@ export const listRepairs = async (req: Request, res: Response) => {
   return res.json({ repairs: jobs });
 };
 
+const repositoryIdOf = (job: { analysis?: { repositoryId?: string } }) => job.analysis?.repositoryId ?? "";
+
 /** GET /api/repairs/:repairJobId — report: patch before/after, test evidence, verification, limitations. */
 export const getRepairReport = async (req: Request, res: Response) => {
   const userId = uid(req);
   const job = await prisma.repairJob.findFirst({
     where: { id: req.params.repairJobId as string, analysis: { repository: { userId } } },
-    include: { attemptHistory: { orderBy: { attemptNumber: "asc" } } },
+    include: { attemptHistory: { orderBy: { attemptNumber: "asc" } }, analysis: { select: { repositoryId: true } } },
   });
   if (!job) return res.status(404).json({ message: "Repair not found" });
 
@@ -175,9 +180,13 @@ export const getRepairReport = async (req: Request, res: Response) => {
     repair: {
       id: job.id, status: job.status, analysisId: job.analysisId, findingId: job.findingId,
       attempts: job.attemptHistory, errorMessage: job.errorMessage, pullRequestUrl: job.pullRequestUrl,
-      approvedAt: job.approvedAt,
+      approvedAt: job.approvedAt, baseCommitSha: job.baseCommitSha, branchName: job.branchName, pullRequestNumber: job.pullRequestNumber,
     },
-    patch: proposal && { title: proposal.title, summary: proposal.summary, risk: proposal.risk, changes: proposal.changes },
+    patch: proposal && {
+      title: proposal.title, summary: proposal.summary, risk: proposal.risk, changes: proposal.changes,
+      // What the owner approves: the hash is recomputed from the stored patch, never taken from the client.
+      patchHash: computePatchHash(proposal.changes as unknown as FixChange[], repositoryIdOf(job)),
+    },
     verification: verification && {
       status: verification.status, summary: verification.summary, confidence: verification.confidence,
       evidence: verification.evidence, reasoning: verification.reasoning,
@@ -193,7 +202,11 @@ export const getRepairReport = async (req: Request, res: Response) => {
   });
 };
 
-/** POST /api/repairs/:repairJobId/approve — the only way a pull request can be created. */
+/**
+ * POST /api/repairs/:repairJobId/approve  body: { patchHash }
+ * The owner approves ONE exact patch (the hash shown in the report). If the stored patch no longer
+ * hashes to that value, or differs from what was verified, nothing is approved.
+ */
 export const approveRepair = async (req: Request, res: Response) => {
   const userId = uid(req);
   const repairJobId = req.params.repairJobId as string;
@@ -215,17 +228,47 @@ export const approveRepair = async (req: Request, res: Response) => {
       return res.status(decision.status).json({ message: decision.message });
     }
 
-    // The approval itself must be on record; if auditing is down, nothing is approved.
-    await recordAudit({ eventType: "PR_APPROVED", outcome: "SUCCESS", actorId: userId, repositoryId: job!.analysis.repository.id, repairJobId }, { failClosed: true });
+    const proposal = await prisma.fixProposal.findFirst({ where: { id: job!.fixProposalId!, analysisId: job!.analysisId } });
+    if (!proposal) return res.status(422).json({ message: "This repair has no stored patch." });
+    const currentHash = computePatchHash(proposal.changes as unknown as FixChange[], job!.analysis.repository.id);
+    const submitted = typeof req.body?.patchHash === "string" ? req.body.patchHash : "";
+    if (!submitted || submitted !== currentHash || (job!.patchHash && job!.patchHash !== currentHash)) {
+      await recordAudit({ eventType: "PR_BLOCKED", outcome: "DENIED", actorId: userId, repositoryId: job!.analysis.repository.id, repairJobId, details: { action: "approve", reason: submitted ? "patch-hash-mismatch" : "patch-hash-missing" } });
+      return res.status(409).json({ code: "PATCH_CHANGED", message: "The patch you reviewed is not the patch on record. Reload the report, review it, and approve again." });
+    }
+    if (!job!.baseCommitSha) {
+      return res.status(422).json({ message: "This repair has no recorded repository state to approve against; run the repair again." });
+    }
 
-    if (!(await transitionRepairJob(repairJobId, "AWAITING_APPROVAL", { status: "APPROVED", approvedAt: new Date(), approvedBy: userId }))) {
+    // The approval itself must be on record; if auditing is down, nothing is approved.
+    await recordAudit({ eventType: "PR_APPROVED", outcome: "SUCCESS", actorId: userId, repositoryId: job!.analysis.repository.id, repairJobId, details: { patchHash: currentHash.slice(0, 12) } }, { failClosed: true });
+
+    if (!(await transitionRepairJob(repairJobId, job!.status, { status: "APPROVED", approvedAt: new Date(), approvedBy: userId, approvedPatchHash: currentHash, approvedBaseCommitSha: job!.baseCommitSha, errorMessage: null, publishLockedUntil: null }))) {
       return res.status(409).json({ message: "This repair was already approved or changed." });
     }
-    await queuePublish({ repairJobId, userId });
+    // If queueing fails the APPROVED row is picked up by the recovery sweep; the approval is not lost.
+    await queuePublish({ repairJobId, userId }, 0).catch((e) => console.error("publish enqueue failed; recovery will retry", e instanceof Error ? e.name : "unknown"));
     return res.status(202).json({ status: "APPROVED", message: "Approved. RepoDoctor will re-run the tests on a fresh clone and open the pull request if they still pass." });
   } catch {
     return res.status(500).json({ message: "Unable to approve this repair. Nothing was published." });
   }
+};
+
+/** POST /api/repairs/:repairJobId/revoke-approval — possible until a branch has been pushed. */
+export const revokeApproval = async (req: Request, res: Response) => {
+  const userId = uid(req);
+  const job = await prisma.repairJob.findFirst({
+    where: { id: req.params.repairJobId as string, analysis: { repository: { userId } } },
+    select: { id: true, status: true, analysis: { select: { repositoryId: true } } },
+  });
+  if (!job) return res.status(404).json({ message: "Repair not found" });
+  if (!(REVOCABLE_STATUSES as readonly string[]).includes(job.status)) {
+    return res.status(409).json({ message: `Approval can no longer be revoked (status: ${job.status}).` });
+  }
+  const ok = await transitionRepairJob(job.id, job.status, { status: "APPROVAL_REVOKED", approvedAt: null, approvedBy: null, approvedPatchHash: null, publishLockedUntil: null });
+  if (!ok) return res.status(409).json({ message: "The repair changed while revoking; check its status and try again." });
+  await recordAudit({ eventType: "PR_BLOCKED", outcome: "DENIED", actorId: userId, repositoryId: job.analysis.repositoryId, repairJobId: job.id, details: { action: "approval-revoked" } });
+  return res.json({ status: "APPROVAL_REVOKED" });
 };
 
 export const rejectRepair = async (req: Request, res: Response) => {

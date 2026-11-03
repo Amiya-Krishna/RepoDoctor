@@ -5,6 +5,8 @@ import path from "node:path";
 
 import { envPositiveInt } from "../config/env-number.js";
 import { buildSandboxRunArgs } from "./docker.args.js";
+import { assertSandboxConfig } from "./sandbox-config.js";
+import { assertWorkspaceSafe } from "./safe-path.js";
 
 import type {
   DockerTestInput,
@@ -65,6 +67,8 @@ export const runDockerTest = async (
   let errorMessage: string | undefined;
 
   try {
+    const config = assertSandboxConfig();
+    await assertWorkspaceSafe(repositoryPath);
     const dockerArgs = buildSandboxRunArgs(
       { ...input, repositoryPath },
       containerName,
@@ -72,7 +76,8 @@ export const runDockerTest = async (
         memory: memoryLimit,
         cpus: cpuLimit,
         pids: pidsLimit,
-        user: process.env.REPAIR_SANDBOX_USER ?? "1000:1000",
+        user: config.user,
+        runtime: config.runtime || undefined,
       },
     );
 

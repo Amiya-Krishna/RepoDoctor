@@ -1,5 +1,5 @@
 import type { AIProvider } from "../ai/ai.provider.js";
-import { recordAudit } from "../audit/audit.service.js";
+import { recordAudit, sanitizeDetails, type AuditEvent } from "../audit/audit.service.js";
 import {
   CURRENT_CONSENT_VERSION,
   DEFAULT_PRIVACY_SETTINGS,
@@ -13,17 +13,20 @@ import {
 
 export interface PrivacyStore {
   get(userId: string): Promise<PrivacySettingsView | null>;
-  save(userId: string, settings: PrivacySettingsView): Promise<PrivacySettingsView>;
+  /**
+   * Persists the settings AND their mandatory audit event atomically (one PostgreSQL transaction).
+   * If the audit event cannot be stored the settings change is rolled back and this throws.
+   */
+  saveWithAudit(userId: string, settings: PrivacySettingsView, audit: AuditEvent): Promise<PrivacySettingsView>;
   repositoryOwner(repositoryId: string): Promise<string | null>;
 }
 
 export interface PrivacyDeps {
   store: PrivacyStore;
   env: () => EgressEnvironment;
-  buildProvider: (request: {
-    mode: "CLOUD" | "LOCAL";
-    onEgress: Parameters<typeof import("../ai/ai.provider.factory.js").createAIProvider>[0]["onEgress"];
-  }) => AIProvider;
+  buildProvider: (request: Parameters<typeof import("../ai/ai.provider.factory.js").createAIProvider>[0]) => AIProvider;
+  /** Injectable clock (consent expiry). */
+  now?: () => Date;
 }
 
 async function prismaStore(): Promise<PrivacyStore> {
@@ -40,7 +43,7 @@ async function prismaStore(): Promise<PrivacyStore> {
       const row = await prisma.privacySettings.findUnique({ where: { userId } });
       return row ? toView(row) : null;
     },
-    async save(userId, s) {
+    async saveWithAudit(userId, s, audit) {
       const data = {
         dataMode: s.dataMode,
         consentVersion: s.consentVersion,
@@ -48,7 +51,22 @@ async function prismaStore(): Promise<PrivacyStore> {
         retentionDays: s.retentionDays,
         notifyOnCritical: s.notifyOnCritical,
       };
-      return toView(await prisma.privacySettings.upsert({ where: { userId }, create: { userId, ...data }, update: data }));
+      const clean = sanitizeDetails(audit.details);
+      const row = await prisma.$transaction(async (tx) => {
+        const saved = await tx.privacySettings.upsert({ where: { userId }, create: { userId, ...data }, update: data });
+        await tx.securityAuditEvent.create({
+          data: {
+            eventType: audit.eventType,
+            outcome: audit.outcome,
+            actorId: audit.actorId ?? null,
+            repositoryId: audit.repositoryId ?? null,
+            repairJobId: audit.repairJobId ?? null,
+            details: clean ? JSON.parse(JSON.stringify(clean)) : undefined,
+          },
+        });
+        return saved;
+      });
+      return toView(row);
     },
     async repositoryOwner(repositoryId) {
       const repo = await prisma.repository.findUnique({ where: { id: repositoryId }, select: { userId: true } });
@@ -67,6 +85,7 @@ async function defaultDeps(): Promise<PrivacyDeps> {
     env: () => ({
       localAiBaseUrl: config.isLocalProviderConfigured() ? process.env.LOCAL_AI_BASE_URL : undefined,
       cloudProvidersConfigured: config.isAnyCloudProviderConfigured(),
+      consentMaxAgeDays: process.env.CONSENT_MAX_AGE_DAYS ? Number(process.env.CONSENT_MAX_AGE_DAYS) : undefined,
     }),
     buildProvider: createAIProvider,
   };
@@ -127,17 +146,32 @@ export async function updatePrivacySettings(
     next.consentedAt = new Date();
   }
 
-  const saved = await d.store.save(userId, next);
+  // Exactly one audit event per successful change; a no-op writes nothing.
+  const changes: Record<string, { from: unknown; to: unknown }> = {};
+  if (previous.dataMode !== next.dataMode) changes.dataMode = { from: previous.dataMode, to: next.dataMode };
+  if (previous.retentionDays !== next.retentionDays) changes.retentionDays = { from: previous.retentionDays, to: next.retentionDays };
+  if (previous.notifyOnCritical !== next.notifyOnCritical) changes.notifyOnCritical = { from: previous.notifyOnCritical, to: next.notifyOnCritical };
+  const consentGranted = update.dataMode !== "NONE"; // consent is re-confirmed on every enabling request
+  if (Object.keys(changes).length === 0 && !consentGranted) return previous;
+
   const withdrawn = update.dataMode === "NONE" && previous.dataMode !== "NONE";
-  await recordAudit(
-    {
-      eventType: withdrawn ? "CONSENT_WITHDRAWN" : update.dataMode === "NONE" ? "PRIVACY_MODE_CHANGED" : "CONSENT_GRANTED",
-      outcome: "SUCCESS",
-      actorId: userId,
-      details: { from: previous.dataMode, to: saved.dataMode, consentVersion: saved.consentVersion, retentionDays: saved.retentionDays },
-    },
-    { failClosed: true },
-  );
+  const eventType: AuditEvent["eventType"] = withdrawn
+    ? "CONSENT_WITHDRAWN"
+    : consentGranted
+      ? "CONSENT_GRANTED"
+      : changes.dataMode
+        ? "PRIVACY_MODE_CHANGED"
+        : changes.retentionDays
+          ? "RETENTION_CHANGED"
+          : "PRIVACY_PREFS_CHANGED";
+
+  const saved = await d.store.saveWithAudit(userId, next, {
+    eventType,
+    outcome: "SUCCESS",
+    actorId: userId,
+    details: { changes, consentVersion: next.consentVersion },
+  });
+  // Consent withdrawn: nothing in flight may continue (checked per request and by the in-flight watchdog).
   return saved;
 }
 
@@ -164,22 +198,59 @@ export async function createAIProviderForUser(
   deps?: PrivacyDeps,
 ): Promise<AIProvider> {
   const d = deps ?? (await defaultDeps());
-  const settings = await d.store.get(userId);
-  const decision = evaluateAIEgress(settings, d.env());
+  const now = () => (d.now ? d.now() : new Date());
 
-  if (!decision.allowed) {
+  /**
+   * Reads the user's CURRENT settings (never cached) and throws unless a model request in
+   * `expectedMode` is allowed right now. Runs before every model call, during it, and before its
+   * result is used. A mode that differs from the one the provider was built for is refused, so a
+   * LOCAL user is never served by a CLOUD provider (or the reverse) after a mid-run switch.
+   */
+  const authorize = async (expectedMode: "CLOUD" | "LOCAL"): Promise<void> => {
+    const settings = await d.store.get(userId); // a read failure propagates: the guard fails closed
+    const decision = evaluateAIEgress(settings, d.env(), now());
+    if (!decision.allowed) {
+      await recordAudit({
+        eventType: "AI_EGRESS_BLOCKED",
+        outcome: "DENIED",
+        actorId: userId,
+        repositoryId,
+        details: { reason: decision.error.code },
+      });
+      throw decision.error;
+    }
+    if (decision.mode !== expectedMode) {
+      await recordAudit({
+        eventType: "AI_EGRESS_BLOCKED",
+        outcome: "DENIED",
+        actorId: userId,
+        repositoryId,
+        details: { reason: "MODE_CHANGED", from: expectedMode, to: decision.mode },
+      });
+      throw new PrivacyPolicyError(
+        "Your data-processing mode changed while this job was running, so the request was not sent.",
+        "MODE_CHANGED",
+        "Start the analysis again under your current privacy settings.",
+      );
+    }
+  };
+
+  // Construction-time check: fail early with a precise error (still re-checked on every request).
+  const initial = evaluateAIEgress(await d.store.get(userId), d.env(), now());
+  if (!initial.allowed) {
     await recordAudit({
       eventType: "AI_EGRESS_BLOCKED",
       outcome: "DENIED",
       actorId: userId,
       repositoryId,
-      details: { reason: decision.error.code },
+      details: { reason: initial.error.code },
     });
-    throw decision.error;
+    throw initial.error;
   }
 
   return d.buildProvider({
-    mode: decision.mode,
+    mode: initial.mode,
+    authorize,
     onEgress: (record) =>
       recordAudit(
         {

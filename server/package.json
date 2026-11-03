@@ -45,9 +45,12 @@
     "test:verification-gate": "tsx src/test-verification-gate.ts",
     "test:app": "tsx src/test-app-middleware.ts",
     "test:auth": "tsx src/test-auth-flow.ts",
+    "test:docker": "REQUIRE_DOCKER_TESTS=true tsx --test src/tests/docker-isolation.test.ts",
     "test": "tsx --test \"src/tests/*.test.ts\"",
     "test:security-suite": "tsx --test \"src/tests/*.test.ts\"",
+    "db:preflight": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f scripts/db-preflight.sql",
     "tokens:migrate": "tsx src/scripts-migrate-tokens.ts",
+    "tokens:migrate:dist": "node dist/scripts-migrate-tokens.js",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],
@@ -70,11 +73,15 @@
     "socket.io": "^4.8.1"
   },
   "devDependencies": {
+    "@prisma/adapter-pg": "^6.19.3",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.6.3",
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.1",
     "tsx": "^4.23.13",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "yaml": "^2.9.1"
   }
 }

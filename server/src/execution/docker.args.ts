@@ -9,6 +9,8 @@ export interface SandboxLimits {
   pids: number;
   /** "uid:gid" the test process runs as. Empty string = image default (root, still capability-less). */
   user: string;
+  /** Optional OCI runtime (for example "runsc" for gVisor). */
+  runtime?: string;
 }
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
@@ -56,6 +58,7 @@ export function buildSandboxRunArgs(
     "--name", containerName,
     "--label", "repodoctor.sandbox=true",
 
+    ...(limits.runtime ? ["--runtime", limits.runtime] : []),
     "--network", "none",
     "--ipc", "none",
 

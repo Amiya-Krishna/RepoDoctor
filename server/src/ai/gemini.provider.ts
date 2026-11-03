@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 
-import type { AIProvider } from "./ai.provider.js";
+import type { AIProvider, AIRequestOptions } from "./ai.provider.js";
 import { aiConfig } from "./ai.config.js";
 
 export class GeminiProvider implements AIProvider {
@@ -18,9 +18,12 @@ export class GeminiProvider implements AIProvider {
     });
   }
 
+  readonly providerName = "gemini";
+
   async generate(
     systemPrompt: string,
-    userPrompt: string
+    userPrompt: string,
+    options?: AIRequestOptions
   ): Promise<string> {
     const response =
       await this.client.models.generateContent({
@@ -35,6 +38,7 @@ export class GeminiProvider implements AIProvider {
             ],
           },
         ],
+        config: { abortSignal: options?.signal },
       });
 
     return response.text ?? "";
@@ -43,7 +47,8 @@ export class GeminiProvider implements AIProvider {
   async generateStructured<T>(
     systemPrompt: string,
     userPrompt: string,
-    schema: Record<string, unknown>
+    schema: Record<string, unknown>,
+    options?: AIRequestOptions
   ): Promise<T> {
     const response =
       await this.client.models.generateContent({
@@ -59,6 +64,7 @@ export class GeminiProvider implements AIProvider {
           },
         ],
         config: {
+          abortSignal: options?.signal,
           responseMimeType:
             "application/json",
           responseSchema: schema,

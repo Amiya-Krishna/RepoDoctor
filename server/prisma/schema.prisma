@@ -342,6 +342,32 @@ model PullRequest {
   @@index([status])
 }
 
+/// Rows removed from "PullRequest" when the (analysisId, findingId) unique index was introduced.
+/// Nothing is discarded: every duplicate is archived here with the id of the row that was kept.
+model PullRequestDuplicateArchive {
+  id                   String   @id
+  analysisId           String
+  findingId            String
+  fixProposalId        String
+  verificationResultId String
+  repositoryOwner      String
+  repositoryName       String
+  branchName           String
+  baseBranch           String
+  commitSha            String
+  pullRequestNumber    Int
+  pullRequestUrl       String
+  title                String
+  status               String
+  createdAt            DateTime
+  keptPullRequestId    String
+  archivedAt           DateTime @default(now())
+  reason               String
+
+  @@index([analysisId, findingId])
+  @@index([keptPullRequestId])
+}
+
 model RepairJob {
   id String @id @default(cuid())
 
@@ -365,6 +391,22 @@ model RepairJob {
   approvedBy           String?
   pullRequestUrl       String?
 
+  // Approval binding: the owner approves one exact patch against one exact
+  // repository state. patchHash/baseCommitSha/preImageHashes are recorded when
+  // the repair is verified; approvedPatchHash when the owner approves.
+  patchHash          String?
+  baseCommitSha      String?
+  preImageHashes     Json?
+  approvedPatchHash  String?
+  approvedBaseCommitSha String?
+
+  // Publication state machine (status carries the stage; these make it recoverable).
+  branchName         String?
+  headCommitSha      String?
+  pullRequestNumber  Int?
+  publishAttempts    Int       @default(0)
+  publishLockedUntil DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   analysis  Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
@@ -372,6 +414,7 @@ model RepairJob {
   @@index([analysisId])
   @@index([findingId])
   @@index([status])
+  @@index([status, publishLockedUntil])
 }
 
 model RepairJobAttempt {
@@ -420,6 +463,7 @@ model SecurityAuditEvent {
   @@index([eventType, createdAt])
   @@index([repositoryId, createdAt])
   @@index([repairJobId, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model PrivacySettings {
@@ -437,12 +481,46 @@ model PrivacySettings {
   updatedAt DateTime @updatedAt
 }
 
+/// Durable webhook lifecycle: PENDING -> PROCESSING -> QUEUED, or FAILED_RETRYABLE / FAILED_PERMANENT.
+/// IGNORED = authentic but nothing to do; LEGACY_CLAIMED = recorded by the pre-lifecycle code (terminal).
 model WebhookDelivery {
-  deliveryId String   @id
-  event      String
-  receivedAt DateTime @default(now())
+  deliveryId         String    @id
+  event              String
+  status             String    @default("PENDING")
+  attempts           Int       @default(0)
+  lockedUntil        DateTime?
+  lastError          String?
+  githubRepositoryId String?
+  ref                String?
+  receivedAt         DateTime  @default(now())
+  updatedAt          DateTime  @default(now()) @updatedAt
+  completedAt        DateTime?
+  outbox             WebhookScanOutbox[]
 
   @@index([receivedAt])
+  @@index([status, updatedAt])
+}
+
+/// Transactional outbox: one row per repository to scan, written in the same
+/// transaction as the delivery. A dispatcher moves rows to the queue; the
+/// deterministic jobId makes re-dispatch after a crash harmless.
+model WebhookScanOutbox {
+  id           String          @id @default(cuid())
+  deliveryId   String
+  delivery     WebhookDelivery @relation(fields: [deliveryId], references: [deliveryId], onDelete: Cascade)
+  repositoryId String
+  userId       String
+  ref          String?
+  jobId        String
+  status       String          @default("PENDING")
+  attempts     Int             @default(0)
+  lastError    String?
+  enqueuedAt   DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @default(now()) @updatedAt
+
+  @@unique([deliveryId, repositoryId])
+  @@index([status, updatedAt])
 }
 
 model Notification {

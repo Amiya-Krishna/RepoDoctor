@@ -29,13 +29,19 @@ export const updateRepairJob = async (
     approvedAt?: Date | null;
     approvedBy?: string | null;
     pullRequestUrl?: string | null;
+    patchHash?: string | null;
+    baseCommitSha?: string | null;
+    preImageHashes?: Record<string, string | null> | null;
+    approvedPatchHash?: string | null;
+    approvedBaseCommitSha?: string | null;
   },
 ) => {
+  const { preImageHashes, ...rest } = data;
   return prisma.repairJob.update({
     where: {
       id: repairJobId,
     },
-    data,
+    data: { ...rest, ...(preImageHashes !== undefined ? { preImageHashes: preImageHashes ?? undefined } : {}) },
   });
 };
 
@@ -47,7 +53,7 @@ export const updateRepairJob = async (
 export const transitionRepairJob = async (
   repairJobId: string,
   from: string,
-  data: { status: string; approvedAt?: Date; approvedBy?: string; errorMessage?: string | null },
+  data: { status: string; approvedAt?: Date | null; approvedBy?: string | null; errorMessage?: string | null; approvedPatchHash?: string | null; approvedBaseCommitSha?: string | null; publishLockedUntil?: Date | null },
 ): Promise<boolean> => {
   const result = await prisma.repairJob.updateMany({
     where: { id: repairJobId, status: from },

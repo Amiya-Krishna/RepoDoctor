@@ -3,8 +3,21 @@ import type {
   GitHubPullRequest,
 } from "./github.types.js";
 
-const GITHUB_API_URL = "https://api.github.com";
+/** Resolved per call so tests and GitHub Enterprise Server can point elsewhere (GITHUB_API_URL). */
+const githubApiUrl = (): string => (process.env.GITHUB_API_URL || "https://api.github.com").replace(/\/+$/, "");
 const GITHUB_API_VERSION = "2026-03-10";
+
+/** Carries the HTTP status so callers can tell "already exists" (422) or "no access" (403/404) from a transient failure. */
+export class GitHubApiError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(`GitHub API error ${status}: ${message}`);
+    this.name = "GitHubApiError";
+  }
+  /** 5xx, 429 and network-level failures are worth retrying; 4xx are decisions. */
+  get transient(): boolean {
+    return this.status >= 500 || this.status === 429;
+  }
+}
 
 const getGitHubToken = (tokenOverride?: string): string => {
   const token = tokenOverride ?? process.env.GITHUB_TOKEN;
@@ -26,7 +39,7 @@ const githubRequest = async <T>(
   const token = getGitHubToken(tokenOverride);
 
   const response = await fetch(
-    `${GITHUB_API_URL}${path}`,
+    `${githubApiUrl()}${path}`,
     {
       ...options,
       headers: {
@@ -60,9 +73,7 @@ const githubRequest = async <T>(
         ? data.message
         : "Unknown GitHub API error.";
 
-    throw new Error(
-      `GitHub API error ${response.status}: ${message}`,
-    );
+    throw new GitHubApiError(response.status, message);
   }
 
   return data as T;
@@ -106,4 +117,43 @@ export const createPullRequest = async (
     baseBranch: result.base.ref,
     state: result.state,
   };
+};
+
+export interface RepositoryAccess {
+  /** The token's user can push to this repository. */
+  canPush: boolean;
+  defaultBranch: string;
+}
+
+/** Re-checks repository authorization right before publishing (access may have been revoked since approval). */
+export const getRepositoryAccess = async (owner: string, repo: string, token: string): Promise<RepositoryAccess> => {
+  const r = await githubRequest<{ permissions?: { push?: boolean }; default_branch: string }>(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
+    {},
+    token,
+  );
+  return { canPush: r.permissions?.push === true, defaultBranch: r.default_branch };
+};
+
+export interface ExistingPullRequest {
+  number: number;
+  htmlUrl: string;
+  state: "open" | "closed";
+  merged: boolean;
+}
+
+/** Finds a pull request whose head is owner:branch (any state), so a retry reuses it instead of creating a duplicate. */
+export const findPullRequestByHead = async (
+  owner: string,
+  repo: string,
+  branch: string,
+  token: string,
+): Promise<ExistingPullRequest | null> => {
+  const list = await githubRequest<{ number: number; html_url: string; state: "open" | "closed"; merged_at?: string | null }[]>(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls?state=all&per_page=5&head=${encodeURIComponent(`${owner}:${branch}`)}`,
+    {},
+    token,
+  );
+  const hit = Array.isArray(list) ? list[0] : undefined;
+  return hit ? { number: hit.number, htmlUrl: hit.html_url, state: hit.state, merged: Boolean(hit.merged_at) } : null;
 };

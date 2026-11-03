@@ -5,6 +5,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { envPositiveInt } from "../config/env-number.js";
+import { assertSandboxConfig, type SandboxConfig } from "./sandbox-config.js";
+import { assertWorkspaceSafe } from "./safe-path.js";
+import { assertInstallPolicy } from "./install-policy.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -171,6 +174,35 @@ const installCommandFor = async (packagePath: string): Promise<string[]> => {
 };
 
 /**
+ * Pure builder for the install container. Non-root, read-only root, no capabilities, resource-limited.
+ * Only this container may have network access (REPAIR_INSTALL_NETWORK=none disables it for offline caches).
+ */
+export function buildInstallRunArgs(
+  o: { resolved: string; volumeName: string; containerDirectory: string; command: string[]; config: SandboxConfig },
+): string[] {
+  return [
+    "run", "--rm",
+    "--label", "repodoctor.sandbox=install",
+    ...(o.config.runtime ? ["--runtime", o.config.runtime] : []),
+    "--network", o.config.installNetwork,
+    "--ipc", "none",
+    "--user", o.config.user,
+    "--memory", "1g", "--memory-swap", "1g", "--cpus", "2", "--pids-limit", "512",
+    "--ulimit", "nofile=4096:4096",
+    "--cap-drop", "ALL",
+    "--security-opt", "no-new-privileges",
+    "--read-only",
+    "--tmpfs", "/tmp:rw,nosuid,size=768m",
+    "-e", "HOME=/tmp", "-e", "npm_config_cache=/tmp/.npm", "-e", "CI=true",
+    "-v", `${o.resolved}:/workspace/repository:rw`,
+    "-v", `${o.volumeName}:${o.containerDirectory}/node_modules`,
+    "-w", o.containerDirectory,
+    NODE_IMAGE,
+    ...o.command,
+  ];
+}
+
+/**
  * Installs dependencies for every package folder into throw-away Docker volumes.
  *
  * Only this step has network access, and it runs with lifecycle scripts
@@ -185,6 +217,8 @@ export const installDependencies = async (
   if (process.env.REPAIR_INSTALL_DEPENDENCIES === "false") return [];
 
   const resolved = path.resolve(repositoryPath);
+  const config = assertSandboxConfig();
+  await assertWorkspaceSafe(resolved);
   const volumes: DependencyVolume[] = [];
 
   for (const directory of await findPackageDirectories(resolved)) {
@@ -193,29 +227,10 @@ export const installDependencies = async (
     const installCommand = await installCommandFor(path.join(resolved, directory));
 
     try {
+      await assertInstallPolicy(path.join(resolved, directory));
       await execFileAsync(
         "docker",
-        [
-          "run", "--rm",
-          "--ipc", "none",
-          "--label", "repodoctor.sandbox=install",
-          "--memory", "1g",
-          "--memory-swap", "1g",
-          "--cpus", "2",
-          "--pids-limit", "512",
-          "--cap-drop", "ALL",
-          "--security-opt", "no-new-privileges",
-          "--read-only",
-          "--tmpfs", "/tmp:rw,nosuid,size=768m",
-          "-e", "HOME=/tmp",
-          "-e", "npm_config_cache=/tmp/.npm",
-          "-e", "CI=true",
-          "-v", `${resolved}:/workspace/repository:rw`,
-          "-v", `${volume.name}:${containerDirectory}/node_modules`,
-          "-w", containerDirectory,
-          NODE_IMAGE,
-          ...installCommand,
-        ],
+        buildInstallRunArgs({ resolved, volumeName: volume.name, containerDirectory, command: installCommand, config }),
         { windowsHide: true, timeout: INSTALL_TIMEOUT_MS, maxBuffer: 5_000_000 },
       );
       volumes.push(volume);

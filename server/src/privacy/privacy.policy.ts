@@ -8,6 +8,9 @@ export type DataMode = "NONE" | "CLOUD" | "LOCAL";
 /** Bump when the consent text materially changes; older consents stop working. */
 export const CURRENT_CONSENT_VERSION = 1;
 
+/** Consent older than this stops working and must be re-confirmed (CONSENT_MAX_AGE_DAYS overrides). */
+export const DEFAULT_CONSENT_MAX_AGE_DAYS = 365;
+
 export const DEFAULT_RETENTION_DAYS = 30;
 export const MIN_RETENTION_DAYS = 1;
 export const MAX_RETENTION_DAYS = 365;
@@ -36,6 +39,8 @@ export class PrivacyPolicyError extends Error {
       | "NO_MODE_SELECTED"
       | "CONSENT_MISSING"
       | "CONSENT_OUTDATED"
+      | "CONSENT_EXPIRED"
+      | "MODE_CHANGED"
       | "LOCAL_AI_NOT_CONFIGURED"
       | "CLOUD_AI_NOT_CONFIGURED"
       | "PROMPT_TOO_LARGE"
@@ -51,6 +56,18 @@ export class PrivacyPolicyError extends Error {
 export interface EgressEnvironment {
   localAiBaseUrl?: string;
   cloudProvidersConfigured: boolean;
+  /** Consent older than this many days is expired. Defaults to DEFAULT_CONSENT_MAX_AGE_DAYS. */
+  consentMaxAgeDays?: number;
+}
+
+/** Finds a PrivacyPolicyError in an error or its cause chain (pipeline code wraps errors). */
+export function findPrivacyPolicyError(error: unknown): PrivacyPolicyError | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && current; depth++) {
+    if (current instanceof PrivacyPolicyError) return current;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
 }
 
 export type EgressDecision =
@@ -60,6 +77,7 @@ export type EgressDecision =
 export function evaluateAIEgress(
   settings: PrivacySettingsView | null | undefined,
   env: EgressEnvironment,
+  now: Date = new Date(),
 ): EgressDecision {
   const s = settings ?? DEFAULT_PRIVACY_SETTINGS;
 
@@ -84,6 +102,15 @@ export function evaluateAIEgress(
       "The data-processing terms changed since you consented.",
       "CONSENT_OUTDATED",
       "Review and re-confirm your choice in Privacy settings.",
+    );
+  }
+
+  const maxAgeDays = env.consentMaxAgeDays ?? DEFAULT_CONSENT_MAX_AGE_DAYS;
+  if (now.getTime() - s.consentedAt.getTime() > maxAgeDays * 86_400_000) {
+    return deny(
+      "Your consent has expired and must be confirmed again.",
+      "CONSENT_EXPIRED",
+      "Open Privacy settings and re-confirm your consent.",
     );
   }
 

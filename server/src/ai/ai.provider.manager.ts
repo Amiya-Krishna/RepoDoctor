@@ -1,4 +1,5 @@
-import type { AIProvider } from "./ai.provider.js";
+import type { AIProvider, AIRequestOptions } from "./ai.provider.js";
+import { PrivacyPolicyError } from "../privacy/privacy.policy.js";
 import { envPositiveInt } from "../config/env-number.js";
 
 const TRANSIENT_RETRIES = envPositiveInt("AI_TRANSIENT_RETRIES", 2);
@@ -36,11 +37,12 @@ export class AIProviderManager implements AIProvider {
   private async run<T>(
     estimatedTokens: number,
     call: (provider: AIProvider) => Promise<T>,
+    options?: AIRequestOptions,
   ): Promise<T> {
     let lastError: unknown;
 
     for (const [index, provider] of this.providers.entries()) {
-      const providerName = provider.constructor.name;
+      const providerName = provider.providerName ?? provider.constructor.name;
 
       if (provider.maxInputTokens && estimatedTokens > provider.maxInputTokens) {
         console.warn(
@@ -62,6 +64,10 @@ export class AIProviderManager implements AIProvider {
           console.log(`[AI] ${providerName} succeeded`);
           return result;
         } catch (error) {
+          // A privacy decision is final: no retry, no fallback to another provider, no wrapping.
+          if (error instanceof PrivacyPolicyError) throw error;
+          if (options?.signal?.aborted) throw error;
+
           lastError = error;
           console.error(`[AI] ${providerName} failed`);
 
@@ -88,20 +94,22 @@ export class AIProviderManager implements AIProvider {
     );
   }
 
-  generate(systemPrompt: string, userPrompt: string): Promise<string> {
+  generate(systemPrompt: string, userPrompt: string, options?: AIRequestOptions): Promise<string> {
     return this.run(estimateTokens(systemPrompt, userPrompt), (provider) =>
-      provider.generate(systemPrompt, userPrompt),
-    );
+      provider.generate(systemPrompt, userPrompt, options),
+    options);
   }
 
   generateStructured<T>(
     systemPrompt: string,
     userPrompt: string,
     schema: Record<string, unknown>,
+    options?: AIRequestOptions,
   ): Promise<T> {
     return this.run(
       estimateTokens(systemPrompt, userPrompt, JSON.stringify(schema)),
-      (provider) => provider.generateStructured<T>(systemPrompt, userPrompt, schema),
+      (provider) => provider.generateStructured<T>(systemPrompt, userPrompt, schema, options),
+      options,
     );
   }
 }

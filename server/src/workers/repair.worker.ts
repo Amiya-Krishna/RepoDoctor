@@ -17,15 +17,16 @@ import { redisConnection, closeScanQueue } from "../queue/scan.queue.js";
 import { createWorkspace, removeWorkspace } from "../services/workspace.service.js";
 import { revealToken } from "../security/token-encryption.js";
 import { runAutonomousRepair } from "../services/autonomous-repair.service.js";
+import { assertTokenStoreSecure } from "../security/token-migration.js";
 import { assertSecureConfiguration } from "../config/startup-checks.js";
 import { publishApprovedRepair } from "../services/publish-approved.service.js";
-import { recoverStaleRepairJobs } from "../services/lifecycle.service.js";
+import { recoverStaleRepairJobs } from "../services/repair-recovery.service.js";
 import { notifyUser } from "../services/notification.service.js";
 import { recordAudit } from "../audit/audit.service.js";
 import { validateTestCommand } from "../security/test-command-policy.js";
 
 import { gitAuthEnvironment } from "../github/git-env.js";
-import { PrivacyPolicyError } from "../privacy/privacy.policy.js";
+import { findPrivacyPolicyError } from "../privacy/privacy.policy.js";
 import type { BugFinding, BugCategory, BugSeverity } from "../agents/bug-detection.types.js";
 import type { SecurityFinding, SecurityCategory, SecuritySeverity } from "../agents/security.types.js";
 
@@ -103,6 +104,8 @@ async function announceOutcome(userId: string, repositoryId: string, status: str
 const start = async () => {
   assertSecureConfiguration("repair-worker");
   await connectDatabase();
+  // Production refuses to start while any stored GitHub token is plaintext or unreadable.
+  await assertTokenStoreSecure();
 
   // Resume what a previous worker left behind: mark orphaned jobs (the user is told)
   // and re-enqueue approvals whose queue message was lost.
@@ -223,7 +226,7 @@ const start = async () => {
       const outcome = await publishApprovedRepair({ repairJobId: job.data.repairJobId, userId: job.data.userId });
       return outcome.status === "PUBLISHED" || outcome.status === "ALREADY_PUBLISHED"
         ? { status: outcome.status, pullRequestUrl: outcome.pullRequestUrl }
-        : { status: outcome.status };
+        : { status: outcome.status }; // RETRYABLE is resumed by the recovery sweep, not by BullMQ
     },
     { connection: redisConnection, concurrency: 1 },
   );
@@ -232,8 +235,9 @@ const start = async () => {
   });
 
   worker.on("failed", async (job, error) => {
-    if (job && error instanceof PrivacyPolicyError) {
-      await notifyUser({ userId: job.data.userId, type: "PRIVACY_BLOCKED", severity: "WARNING", title: "Repair not started: privacy settings", message: `${error.message} ${error.recovery}`.slice(0, 600) });
+    const privacyError = findPrivacyPolicyError(error);
+    if (job && privacyError) {
+      await notifyUser({ userId: job.data.userId, type: "PRIVACY_BLOCKED", severity: "WARNING", title: "Repair not started: privacy settings", message: `${privacyError.message} ${privacyError.recovery}`.slice(0, 600) });
     }
     console.error("Autonomous repair queue job failed", {
       jobId: job?.id,

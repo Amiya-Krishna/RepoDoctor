@@ -85,8 +85,13 @@ console.log("Security control tests passed.");
   const stored = protectToken("gho_exampletoken123");
   assert.notEqual(stored, "gho_exampletoken123");
   assert.equal(revealToken(stored), "gho_exampletoken123");
-  // Legacy plaintext values stored before encryption was wired in still work.
+  // Legacy plaintext values are NOT accepted by default (fail closed; migrate them with `npm run tokens:migrate`);
+  // only an explicit non-production opt-in reads them.
+  delete process.env.ALLOW_PLAINTEXT_TOKENS;
+  assert.throws(() => revealToken("gho_legacyplaintext456"), /not encrypted/);
+  process.env.ALLOW_PLAINTEXT_TOKENS = "true";
   assert.equal(revealToken("gho_legacyplaintext456"), "gho_legacyplaintext456");
+  delete process.env.ALLOW_PLAINTEXT_TOKENS;
 
   const savedKey = process.env.GITHUB_TOKEN_ENCRYPTION_KEY;
   delete process.env.GITHUB_TOKEN_ENCRYPTION_KEY;

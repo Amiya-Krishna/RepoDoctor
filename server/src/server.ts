@@ -5,6 +5,7 @@ import { connectDatabase, disconnectDatabase } from "./config/prisma.js";
 import { initRealtime, closeRealtime } from "./realtime/socket.js";
 import { closeScanQueue } from "./queue/scan.queue.js";
 import { closeRepairQueue } from "./queue/repair.queue.js";
+import { assertTokenStoreSecure } from "./security/token-migration.js";
 import { assertSecureConfiguration } from "./config/startup-checks.js";
 import { log } from "./logging/logger.js";
 
@@ -18,6 +19,8 @@ const startServer = async () => {
   assertSecureConfiguration("api");
 
   await connectDatabase();
+  // Production refuses to start while any stored GitHub token is plaintext or unreadable.
+  await assertTokenStoreSecure();
 
   const httpServer = createServer(app);
 

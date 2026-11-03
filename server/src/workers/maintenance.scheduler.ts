@@ -1,6 +1,6 @@
 import { prisma } from "../config/prisma.js";
 import { recordAudit } from "../audit/audit.service.js";
-import { evaluateAIEgress, DEFAULT_PRIVACY_SETTINGS } from "../privacy/privacy.policy.js";
+import { evaluateAIEgress, DEFAULT_PRIVACY_SETTINGS, type PrivacySettingsView } from "../privacy/privacy.policy.js";
 import { isAnyCloudProviderConfigured, isLocalProviderConfigured } from "../ai/ai.config.js";
 import { queueRepositoryScan } from "../queue/scan.queue.js";
 import { isScanDue, scheduledScanJobId, DAY_MS } from "../services/maintenance.js";
@@ -19,9 +19,20 @@ export async function runScheduledScans(now = new Date()): Promise<number> {
   for (const repo of repositories) {
     if (!isScanDue(repo, now, SCAN_INTERVAL_MS) || !repo.user.githubAccessToken) continue;
 
-    const decision = evaluateAIEgress(repo.user.privacySettings ?? DEFAULT_PRIVACY_SETTINGS, {
+    const row = repo.user.privacySettings;
+    const settings: PrivacySettingsView = row
+      ? {
+          dataMode: row.dataMode === "CLOUD" || row.dataMode === "LOCAL" ? row.dataMode : "NONE",
+          consentVersion: row.consentVersion,
+          consentedAt: row.consentedAt,
+          retentionDays: row.retentionDays,
+          notifyOnCritical: row.notifyOnCritical,
+        }
+      : DEFAULT_PRIVACY_SETTINGS;
+    const decision = evaluateAIEgress(settings, {
       localAiBaseUrl: isLocalProviderConfigured() ? process.env.LOCAL_AI_BASE_URL : undefined,
       cloudProvidersConfigured: isAnyCloudProviderConfigured(),
+      consentMaxAgeDays: process.env.CONSENT_MAX_AGE_DAYS ? Number(process.env.CONSENT_MAX_AGE_DAYS) : undefined,
     });
     if (!decision.allowed) {
       await recordAudit({ eventType: "AI_EGRESS_BLOCKED", outcome: "DENIED", actorId: repo.userId, repositoryId: repo.id, details: { reason: decision.error.code, trigger: "scheduled" } });

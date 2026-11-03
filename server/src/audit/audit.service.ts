@@ -4,6 +4,7 @@ export type AuditEventType =
   | "AUTH_REGISTER" | "AUTH_LOGIN_FAILED"
   | "GITHUB_CONNECTED" | "GITHUB_DISCONNECTED"
   | "PRIVACY_MODE_CHANGED" | "CONSENT_GRANTED" | "CONSENT_WITHDRAWN"
+  | "RETENTION_CHANGED" | "PRIVACY_PREFS_CHANGED" | "DATA_DELETION_REQUESTED"
   | "AI_EGRESS" | "AI_EGRESS_BLOCKED"
   | "WEBHOOK_REJECTED" | "WEBHOOK_REPLAY" | "WEBHOOK_ACCEPTED"
   | "REPAIR_QUEUED" | "REPAIR_REJECTED" | "REPAIR_VERIFIED" | "REPAIR_NOT_VERIFIED"
@@ -51,10 +52,26 @@ async function defaultSink(): Promise<AuditSink> {
   };
 }
 
-/** Defence in depth: scrub anything secret-like and cap size before storage. */
+/** Keys that may carry source code, prompts or credentials: never stored in audit details. */
+const FORBIDDEN_KEYS = /^(source|sourcecode|code|prompt|content|patch|diff|token|accesstoken|password|secret|authorization|apikey|cookie|body)$/i;
+
+function stripForbidden(value: unknown, depth = 0): unknown {
+  if (depth > 6) return "[truncated]";
+  if (Array.isArray(value)) return value.map((v) => stripForbidden(v, depth + 1));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([k]) => !FORBIDDEN_KEYS.test(k))
+        .map(([k, v]) => [k, stripForbidden(v, depth + 1)]),
+    );
+  }
+  return value;
+}
+
+/** Defence in depth: drop forbidden keys, scrub anything secret-like and cap size before storage. */
 export function sanitizeDetails(details: Record<string, unknown> | undefined) {
   if (!details) return undefined;
-  const text = redactSecrets(JSON.stringify(details)).slice(0, 8000);
+  const text = redactSecrets(JSON.stringify(stripForbidden(details))).slice(0, 8000);
   try {
     return JSON.parse(text) as Record<string, unknown>;
   } catch {

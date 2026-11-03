@@ -94,10 +94,14 @@ test("stale-job classification after a worker crash", () => {
   const t = { runningMs: 45 * 60_000, approvedMs: 120_000 };
   assert.equal(classifyStaleRepairJob("RUNNING", 10 * 60_000, t), "NONE", "a healthy long job is left alone");
   assert.equal(classifyStaleRepairJob("RUNNING", 60 * 60_000, t), "MARK_INTERRUPTED");
-  assert.equal(classifyStaleRepairJob("PUBLISHING", 60 * 60_000, t), "MARK_PUBLISH_INTERRUPTED");
+  // Publication stages are RESUMED (bounded), never abandoned: the state machine re-derives its position.
+  for (const stage of ["REVALIDATING", "TESTING", "BRANCH_PUSHED", "PR_CREATED", "PUBLISH_FAILED_RETRYABLE"]) {
+    assert.equal(classifyStaleRepairJob(stage, 60_000, t, 1), "REQUEUE_PUBLISH", stage);
+    assert.equal(classifyStaleRepairJob(stage, 60_000, t, 5), "BLOCK_PUBLISH_EXHAUSTED", stage);
+  }
   assert.equal(classifyStaleRepairJob("APPROVED", 5 * 60_000, t), "REQUEUE_PUBLISH");
   assert.equal(classifyStaleRepairJob("APPROVED", 30_000, t), "NONE");
-  for (const s of ["AWAITING_APPROVAL", "VERIFIED", "PUBLISHED", "FAILED"]) assert.equal(classifyStaleRepairJob(s, 1e12, t), "NONE", s);
+  for (const s of ["AWAITING_APPROVAL", "VERIFIED", "COMPLETED", "PUBLISHED", "FAILED", "PUBLISH_BLOCKED", "NEEDS_REAPPROVAL", "APPROVAL_REVOKED"]) assert.equal(classifyStaleRepairJob(s, 1e12, t), "NONE", s);
 });
 
 test("retention cutoff", () => {

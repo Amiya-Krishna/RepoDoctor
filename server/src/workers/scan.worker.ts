@@ -10,10 +10,12 @@ import {
 } from "../queue/scan.queue.js";
 import { ingestRepository } from "../services/ingestion.service.js";
 import { revealToken } from "../security/token-encryption.js";
+import { assertTokenStoreSecure } from "../security/token-migration.js";
 import { assertSecureConfiguration } from "../config/startup-checks.js";
 import { startMaintenanceScheduler } from "./maintenance.scheduler.js";
+import { startWebhookRecoveryLoop } from "../github/webhook-recovery.js";
 import { notifyUser } from "../services/notification.service.js";
-import { PrivacyPolicyError } from "../privacy/privacy.policy.js";
+import { findPrivacyPolicyError } from "../privacy/privacy.policy.js";
 
 async function notifyScanResult(userId: string, repositoryId: string, analysisId: string) {
   const [bug, sec, prefs] = await Promise.all([
@@ -36,7 +38,11 @@ async function notifyScanResult(userId: string, repositoryId: string, analysisId
 const start = async () => {
   assertSecureConfiguration("scan-worker");
   await connectDatabase();
+  // Production refuses to start while any stored GitHub token is plaintext or unreadable.
+  await assertTokenStoreSecure();
   const stopScheduler = startMaintenanceScheduler();
+  // Finishes webhook deliveries that were durably recorded but not yet queued (Redis outage, crash, expired lease).
+  const stopWebhookRecovery = await startWebhookRecoveryLoop();
 
   const worker = new Worker<RepositoryScanJobData, RepositoryScanResult>(
     SCAN_QUEUE_NAME,
@@ -107,14 +113,15 @@ const start = async () => {
       } catch (error) {
         // A privacy block is deterministic: retrying cannot fix it, so stop retrying
         // and tell the user exactly what to change.
-        if (error instanceof PrivacyPolicyError) {
+        const privacyError = findPrivacyPolicyError(error); // also when consent was withdrawn mid-analysis (wrapped by the pipeline)
+        if (privacyError) {
           await prisma.analysis.updateMany({ where: { id: analysisId, repositoryId }, data: { status: "FAILED", completedAt: new Date() } });
           await notifyUser({
             userId, type: "PRIVACY_BLOCKED", severity: "WARNING", repositoryId,
             title: "Analysis not started: privacy settings",
-            message: `${error.message} ${error.recovery}`,
+            message: `${privacyError.message} ${privacyError.recovery}`,
           });
-          throw new UnrecoverableError(`${error.message} ${error.recovery}`);
+          throw new UnrecoverableError(`${privacyError.message} ${privacyError.recovery}`);
         }
         const maxAttempts = job.opts.attempts ?? 1;
         if (analysisId && job.attemptsMade + 1 >= maxAttempts) {
@@ -145,6 +152,7 @@ const start = async () => {
 
   const shutdown = async () => {
     stopScheduler();
+    stopWebhookRecovery();
     await worker.close();
     await closeScanQueue();
     await disconnectDatabase();

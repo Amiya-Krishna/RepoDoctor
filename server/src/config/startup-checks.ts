@@ -1,3 +1,5 @@
+import { isLowEntropyKey, loadKeyring } from "../security/token-encryption.js";
+
 export interface ConfigProblem {
   level: "error" | "warning";
   message: string;
@@ -26,8 +28,13 @@ export function collectSecurityConfigProblems(
   const key = env.GITHUB_TOKEN_ENCRYPTION_KEY;
   if (!key) {
     err("GITHUB_TOKEN_ENCRYPTION_KEY is required (32 random bytes, base64).");
-  } else if (Buffer.from(key, "base64").length !== 32) {
-    err("GITHUB_TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes.");
+  } else {
+    try {
+      const ring = loadKeyring(env);
+      if (isLowEntropyKey(ring.current)) err("GITHUB_TOKEN_ENCRYPTION_KEY has too little entropy (use 32 random bytes).");
+    } catch (e) {
+      err(e instanceof Error ? e.message : "GITHUB_TOKEN_ENCRYPTION_KEY is invalid.");
+    }
   }
 
   if (role === "api") {

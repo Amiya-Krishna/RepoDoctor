@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import type { AIProvider } from "./ai.provider.js";
+import type { AIProvider, AIRequestOptions } from "./ai.provider.js";
 
 /**
  * Self-hosted model through an OpenAI-compatible endpoint (Ollama /v1,
@@ -21,14 +21,16 @@ export class LocalProvider implements AIProvider {
     this.client = new OpenAI({ apiKey, baseURL, timeout: 10 * 60_000, maxRetries: 0 });
   }
 
-  async generate(systemPrompt: string, userPrompt: string): Promise<string> {
+  readonly providerName = "local";
+
+  async generate(systemPrompt: string, userPrompt: string, options?: AIRequestOptions): Promise<string> {
     const response = await this.client.chat.completions.create({
       model: this.model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-    });
+    }, { signal: options?.signal });
     return response.choices[0]?.message?.content ?? "";
   }
 
@@ -36,10 +38,12 @@ export class LocalProvider implements AIProvider {
     systemPrompt: string,
     userPrompt: string,
     schema: Record<string, unknown>,
+    options?: AIRequestOptions,
   ): Promise<T> {
     const raw = await this.generate(
       `${systemPrompt}\n\nRespond with ONLY a single JSON object (no markdown, no commentary) conforming to this JSON schema:\n${JSON.stringify(schema)}`,
       userPrompt,
+      options,
     );
     const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
     const start = cleaned.indexOf("{");

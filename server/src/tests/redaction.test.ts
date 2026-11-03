@@ -76,7 +76,7 @@ function spy() {
 
 test("guarded provider: secrets in either prompt never reach the model", async () => {
   const { inner, seen } = spy();
-  const g = new GuardedAIProvider(inner, { mode: "CLOUD", onEgress: () => undefined });
+  const g = new GuardedAIProvider(inner, { authorize: async () => undefined, mode: "CLOUD", onEgress: () => undefined });
   const t = fake.githubToken();
   await g.generateStructured("sys " + t, "user " + t, {});
   assert.equal(seen.length, 1);
@@ -85,7 +85,7 @@ test("guarded provider: secrets in either prompt never reach the model", async (
 
 test("guarded provider: oversized prompts are refused (data minimisation)", async () => {
   const { inner, seen } = spy();
-  const g = new GuardedAIProvider(inner, { mode: "CLOUD", onEgress: () => undefined, maxPromptChars: 1000 });
+  const g = new GuardedAIProvider(inner, { authorize: async () => undefined, mode: "CLOUD", onEgress: () => undefined, maxPromptChars: 1000 });
   await assert.rejects(() => g.generate("s", "x".repeat(2000)), (e: unknown) => (e as PrivacyPolicyError).code === "PROMPT_TOO_LARGE");
   assert.equal(seen.length, 0);
   assert.ok(DEFAULT_MAX_PROMPT_CHARS > 0);
@@ -93,7 +93,7 @@ test("guarded provider: oversized prompts are refused (data minimisation)", asyn
 
 test("guarded provider: fails closed if the audit hook throws", async () => {
   const { inner, seen } = spy();
-  const g = new GuardedAIProvider(inner, { mode: "LOCAL", onEgress: () => { throw new Error("audit unavailable"); } });
+  const g = new GuardedAIProvider(inner, { authorize: async () => undefined, mode: "LOCAL", onEgress: () => { throw new Error("audit unavailable"); } });
   await assert.rejects(() => g.generate("s", "u"));
   assert.equal(seen.length, 0);
 });

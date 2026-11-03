@@ -8,6 +8,7 @@ import { createAIProviderForUser, updatePrivacySettings, getPrivacySettings, typ
 import type { AIProvider } from "../ai/ai.provider.js";
 import { GuardedAIProvider } from "../ai/guarded.provider.js";
 import { captureAudit, fake } from "./helpers.js";
+import { recordAudit } from "../audit/audit.service.js";
 
 const env = { localAiBaseUrl: "http://llm.internal:11434/v1", cloudProvidersConfigured: true };
 const consented = (mode: "CLOUD" | "LOCAL", over: Partial<PrivacySettingsView> = {}): PrivacySettingsView => ({
@@ -20,7 +21,8 @@ function memoryStore(initial?: PrivacySettingsView): PrivacyStore & { data: Map<
   return {
     data,
     async get(id) { return data.get(id) ?? null; },
-    async save(id, s) { data.set(id, s); return s; },
+    // Emulates the Prisma transaction: the audit event is written first and a failure aborts the save.
+    async saveWithAudit(id, s, audit) { await recordAudit(audit, { failClosed: true }); data.set(id, s); return s; },
     async repositoryOwner(r) { return r === "r1" ? "u1" : null; },
   };
 }
@@ -33,7 +35,7 @@ function depsWith(store: PrivacyStore, calls: string[], e = env): PrivacyDeps {
   return {
     store,
     env: () => e,
-    buildProvider: ({ mode, onEgress }) => new GuardedAIProvider(inner, { mode, onEgress }),
+    buildProvider: ({ mode, onEgress, authorize }) => new GuardedAIProvider(inner, { mode, onEgress, authorize }),
   };
 }
 

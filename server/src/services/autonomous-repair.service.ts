@@ -26,6 +26,26 @@ import {
   resolveWorkingDirectory,
 } from "../execution/docker.dependencies.js";
 
+import { prisma } from "../config/prisma.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { computePatchHash, computePreImageHashes } from "../repair/patch-hash.js";
+import type { FixChange } from "../agents/fix.types.js";
+
+const execFileAsync = promisify(execFile);
+
+async function captureApprovalBinding(repositoryId: string, fixProposalId: string, analysisId: string, sourceRepositoryPath: string) {
+  const proposal = await prisma.fixProposal.findFirst({ where: { id: fixProposalId, analysisId } });
+  if (!proposal) throw new Error("Verified fix proposal not found; cannot bind approval.");
+  const changes = proposal.changes as unknown as FixChange[];
+  const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: sourceRepositoryPath });
+  return {
+    patchHash: computePatchHash(changes, repositoryId),
+    baseCommitSha: stdout.trim(),
+    preImageHashes: await computePreImageHashes(sourceRepositoryPath, changes),
+  };
+}
+
 import {
   saveRepairAttempt,
 } from "./repair-job-history.service.js";
@@ -146,13 +166,17 @@ export const runAutonomousRepair = async (
       : undefined;
     const awaitingApproval = Boolean(winning?.fixProposalId && winning?.verificationResultId);
 
+    // Bind the approval to this exact patch and repository state (hash of the stored proposal, HEAD of the
+    // verified clone, and the pre-image of every touched file) so a later change invalidates the approval.
+    const binding = awaitingApproval ? await captureApprovalBinding(input.repositoryId, winning!.fixProposalId!, input.analysisId, input.sourceRepositoryPath) : undefined;
+
     await updateRepairJob(
       repairJob.id,
       {
         status: awaitingApproval ? "AWAITING_APPROVAL" : result.status,
         currentAttempt,
         ...(awaitingApproval
-          ? { fixProposalId: winning!.fixProposalId, verificationResultId: winning!.verificationResultId }
+          ? { fixProposalId: winning!.fixProposalId, verificationResultId: winning!.verificationResultId, ...binding }
           : {}),
       },
     );

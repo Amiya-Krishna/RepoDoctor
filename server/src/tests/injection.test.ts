@@ -44,7 +44,7 @@ test("every model request carries the non-overridable security rules", async () 
     async generate(s) { system = s; return ""; },
     async generateStructured<T>(s: string) { system = s; return {} as T; },
   };
-  await new GuardedAIProvider(inner, { mode: "CLOUD", onEgress: () => undefined }).generateStructured("task", hostile, {});
+  await new GuardedAIProvider(inner, { authorize: async () => undefined, mode: "CLOUD", onEgress: () => undefined }).generateStructured("task", hostile, {});
   assert.ok(system.includes(UNTRUSTED_DATA_PREAMBLE));
 });
 

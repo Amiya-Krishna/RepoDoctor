@@ -4,7 +4,13 @@
  */
 import type { VerificationResult } from "../agents/verification.types.js";
 
-export const ACTIVE_REPAIR_STATUSES = ["QUEUED", "RUNNING", "AWAITING_APPROVAL", "APPROVED", "PUBLISHING"] as const;
+export const ACTIVE_REPAIR_STATUSES = [
+  "QUEUED", "RUNNING", "AWAITING_APPROVAL", "APPROVED", "PUBLISHING",
+  "REVALIDATING", "TESTING", "BRANCH_PUSHED", "PR_CREATED", "PUBLISH_FAILED_RETRYABLE", "NEEDS_REAPPROVAL",
+] as const;
+
+/** Publication stages in which approval may still be revoked (nothing is on GitHub yet). */
+export const REVOCABLE_STATUSES = ["APPROVED", "REVALIDATING", "TESTING"] as const;
 
 export type RepairRequestDecision =
   | { ok: true }
@@ -39,7 +45,7 @@ export function decideRepairRequest(facts: {
 export const repairQueueJobId = (analysisId: string, findingId: string, generation: number) =>
   `repair-${analysisId}-${findingId}-${generation}`;
 
-export const publishQueueJobId = (repairJobId: string) => `publish-${repairJobId}`;
+export const publishQueueJobId = (repairJobId: string, generation = 0) => `publish-${repairJobId}-${generation}`;
 
 export type ApprovalDecision =
   | { ok: true }
@@ -54,7 +60,7 @@ export function decideApproval(facts: {
   if (!facts.job || facts.repositoryOwnerId === null || facts.repositoryOwnerId !== facts.actorId) {
     return { ok: false, status: 404, message: "Repair not found" };
   }
-  if (facts.job.status !== "AWAITING_APPROVAL") {
+  if (facts.job.status !== "AWAITING_APPROVAL" && facts.job.status !== "NEEDS_REAPPROVAL") {
     return { ok: false, status: 409, message: `Only a verified repair that is awaiting approval can be approved (current status: ${facts.job.status}).` };
   }
   if (!facts.job.verificationResultId || !facts.job.fixProposalId) {
