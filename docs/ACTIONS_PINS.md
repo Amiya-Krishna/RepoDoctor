@@ -14,6 +14,6 @@ How each was verified: `git ls-remote --tags https://github.com/<owner>/<repo> r
 
 Findings while doing this:
 - The previous `aquasecurity/trivy-action@0.28.0` referenced a tag that does not exist upstream (the tag is `v0.28.0`), so those scan steps could not have resolved. `v0.28.0` would also have left two **nested** actions on mutable tags (`setup-trivy@v0.2.1`, `actions/cache@v4`), so `v0.36.0`, which pins its nested actions, is used instead.
-- What a SHA pin does not cover: the action's own runtime downloads (for example the Trivy binary and vulnerability database) and the correctness of the pinned code, which was inspected only at the metadata/`uses:` level, not audited line by line.
+- What a SHA pin does not cover: the action's own runtime downloads (for example the Trivy binary and vulnerability database) and the correctness of the pinned code, which is checked only at the metadata and `uses:` level, not audited line by line.
 
 Updating: Dependabot (`github-actions`) opens PRs that change the SHA and the version comment. Re-run the verification above before merging a bump of `trivy-action`, `checkout` or the Docker actions, and keep the table in sync (`workflows.test.ts` fails if a pinned SHA is not listed here).

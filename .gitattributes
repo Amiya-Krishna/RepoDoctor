@@ -1,0 +1,4 @@
+# Applied migrations are checksummed byte-for-byte (Prisma _prisma_migrations and
+# server/prisma/SHIPPED_MIGRATIONS.sha256). Never let git rewrite their line endings.
+server/prisma/migrations/**/migration.sql -text
+server/prisma/SHIPPED_MIGRATIONS.sha256 text eol=lf

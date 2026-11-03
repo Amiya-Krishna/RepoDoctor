@@ -6,7 +6,7 @@ RepoDoctor AI connects to a user's GitHub repositories, builds a repository snap
 
 The project is Docker-based: the supported way to run the whole stack is `docker compose up`. Docker is also what the repair worker uses to run a repository's tests in isolation.
 
-> **Privacy and security update.** AI analysis is off until each user chooses a data-processing mode (Cloud AI, Self-hosted AI, or Off) and consents; secrets are redacted before any model request; verified repairs wait for the owner's approval and are re-tested before a pull request is opened. Start with [docs/PRODUCTION_READINESS_REPORT.md](docs/PRODUCTION_READINESS_REPORT.md) (what is verified and what is not), [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and the architecture diagram in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Run the security suite with `cd server && npm test`.
+> **Privacy and security update.** AI analysis is off until each user chooses a data-processing mode (Cloud AI, Self-hosted AI, or Off) and consents; secrets are redacted before any model request; verified repairs wait for the owner's approval and are re-tested before a pull request is opened. Start with [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/OPERATIONS_SECURITY.md](docs/OPERATIONS_SECURITY.md) and the architecture diagram in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Run the security suite with `cd server && npm test`.
 
 ## Contents
 
@@ -129,7 +129,7 @@ If it is the other RepoDoctor mode: `docker compose down` (Docker) or `Ctrl+C` i
 ### Prerequisites
 
 - Docker Engine 24+ with the Compose plugin (`docker compose version`). The commands below were checked with Docker 29 and Compose v5.
-- Access to Docker Hub (images `node:22-bookworm-slim`, `nginx:alpine`, `redis:7-alpine`, and `postgres:16-alpine` for the bundled database) and to `binaries.prisma.sh` / the npm registry during image builds.
+- Access to Docker Hub (images `node:22-bookworm-slim`, `nginxinc/nginx-unprivileged:alpine`, `redis:7-alpine`, and `postgres:16-alpine` for the bundled database) and to `binaries.prisma.sh` / the npm registry during image builds.
 - A PostgreSQL 16 database: either an external one such as Neon (default) or the bundled container (`bundled-db` profile).
 - At least **one** AI provider key (`OPENROUTER_API_KEY`, `GROQ_API_KEY` or `GEMINI_API_KEY`) for analysis and repair.
 - A GitHub OAuth app, only for the GitHub features (registration and login work without it).
@@ -308,7 +308,7 @@ The API container needs outbound HTTPS to `github.com` and `api.github.com`; `/a
 
 ## Implementation status
 
-Status labels are defined in the [development history](docs/DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document).
+**Implemented**: working and covered by automated tests. **Partially implemented**: working with documented gaps. **Planned**: not built yet.
 
 | Capability | Status |
 |---|---|
@@ -329,15 +329,16 @@ Status labels are defined in the [development history](docs/DEVELOPMENT_HISTORY.
 | Verified-only pull request publication | Implemented |
 | End-to-end repair flow | Implemented |
 | BullMQ queues and two worker processes | Implemented |
-| GitHub webhooks | Signature **verified (unit)** |
+| GitHub webhooks | Implemented (signature verification unit-tested) |
 | Socket.IO real-time progress | Implemented |
 | Repository memory (lexical hashed-vector retrieval) | Partially implemented |
-| Benchmark evaluator and 5-case fixture | Evaluator **verified (unit)**; **no measured results** |
+| Benchmark evaluator and 5-case fixture | Evaluator implemented and unit-tested; no benchmark results published yet |
 | Rate limiting | Implemented (`test:app`) |
 | Token encryption, strict command policy, untrusted-context wrapper | Partially implemented |
-| Audit logging | Planned / not implemented (table only) |
+| Audit logging (append-only audit table, consent/egress/approval events) | Implemented |
 | Docker Compose deployment (PostgreSQL, Redis, API, workers, client) | Implemented |
-| CI/CD, AWS deployment, refresh tokens | Planned / not implemented |
+| CI (GitHub Actions), manual release workflow | Implemented |
+| AWS deployment, refresh tokens | Planned |
 | Real screenshots, demo recording, licence file | Planned / not implemented |
 
 ## Architecture
@@ -430,7 +431,7 @@ npm run preview -- --port 8080 --host 127.0.0.1 &  E2E_BASE_URL=http://127.0.0.1
 docker compose config -q
 ```
 
-What each suite covers is listed in `docs/PRODUCTION_READINESS_REPORT.md`. Older ad-hoc scripts (`npm run test:security`, `test:webhook-signature`, `test:static-security`, `test:verification-gate`) still run without services; those that import Prisma need `npx prisma generate`.
+Test files live in `server/src/tests/` and `client/src/`; step-by-step functional checks are in [docs/MANUAL_TESTING_GUIDE.md](docs/MANUAL_TESTING_GUIDE.md). Older ad-hoc scripts (`npm run test:security`, `test:webhook-signature`, `test:static-security`, `test:verification-gate`) still run without services; those that import Prisma need `npx prisma generate`.
 
 ## Troubleshooting
 
@@ -485,12 +486,9 @@ Docker volumes left behind by an interrupted run can be removed with `docker vol
 
 ## Documentation
 
-1. [Architecture](docs/ARCHITECTURE.md) — reference diagram, stack, API surface, flows, trust boundaries.
-2. [Operations and security](docs/OPERATIONS_SECURITY.md) — environment variables, security controls, Compose deployment, failure triage.
-3. [Deployment](docs/DEPLOYMENT.md) and [database migrations](docs/DATABASE_MIGRATIONS.md) — upgrade order, backup/restore, sandbox host.
-3a. [GitHub Actions pins](docs/ACTIONS_PINS.md) and [evidence logs](docs/evidence/).
-3b. [Production readiness report](docs/PRODUCTION_READINESS_REPORT.md) — what was verified, how, and what is not.
-3c. [Manual testing guide](docs/MANUAL_TESTING_GUIDE.md) — setup and functional test cases.
-4. [Development history](docs/DEVELOPMENT_HISTORY.md) — day-by-day development log of the 30-day plan.
-5. [Server](server/README.md) and [client](client/README.md) notes.
-
+- [Architecture](docs/ARCHITECTURE.md): diagram, stack, API surface, flows and trust boundaries.
+- [Operations and security](docs/OPERATIONS_SECURITY.md): environment variables, security controls, Compose deployment, failure triage.
+- [Deployment](docs/DEPLOYMENT.md) and [database migrations](docs/DATABASE_MIGRATIONS.md): upgrade order, backup and restore, sandbox host.
+- [GitHub Actions pins](docs/ACTIONS_PINS.md): pinned third-party actions and how they were verified.
+- [Manual testing guide](docs/MANUAL_TESTING_GUIDE.md): setup and functional test cases.
+- [Server](server/README.md) and [client](client/README.md) notes.

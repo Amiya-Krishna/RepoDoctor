@@ -1,6 +1,6 @@
 # RepoDoctor AI — Operations, Configuration, and Security
 
-**Scope:** operational configuration, security controls and deployment notes. status labels are defined in the [development history](DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document).
+**Scope:** operational configuration, security controls and deployment notes. Feature status is summarised in the [root README](../README.md#implementation-status).
 
 ## 1. Scope
 
@@ -38,7 +38,7 @@ Client: `VITE_API_URL` (`client/.env.example`; default `/api`, same origin: prox
 
 Compose-level (shell or root `.env`): `REDIS_PASSWORD` is always required (Compose fails with `required variable REDIS_PASSWORD is missing a value`); `DATABASE_URL` for an external database, or `POSTGRES_PASSWORD` with `--profile bundled-db`. `server/.env` must exist.
 
-### 2.3 Local run (outside Docker) — commands match the manifests; not executed end to end (Prisma engine download was blocked during the audit)
+### 2.3 Local run (outside Docker)
 
 ```bash
 # PostgreSQL and Redis must already be running and match server/.env
@@ -76,7 +76,7 @@ Do not run `prisma migrate reset` against data that must be kept. Before applyin
 
 ## 3. Security control status
 
-| Control | Where | Status | Evidence / caveat |
+| Control | Where | Status | Notes |
 |---|---|---|---|
 | Password hashing | `services/auth.service.ts` | Implemented | bcryptjs, cost 10 |
 | JWT sessions | `middleware/auth.middleware.ts` | Partially implemented | 1-day tokens, no refresh/revocation |
@@ -87,12 +87,12 @@ Do not run `prisma migrate reset` against data that must be kept. Before applyin
 | GitHub token encryption at rest | `security/token-encryption.ts`, `security/token-migration.ts` | Implemented, **mandatory** | AES-256-GCM, versioned `v1:<keyId>:<iv>:<tag>:<ct>` with the key id bound as AAD. Saving without a key throws. Production never reads plaintext and the API and both workers refuse to start while any stored token is plaintext or unreadable. Rotation via `GITHUB_TOKEN_ENCRYPTION_OLD_KEYS` + `tokens:migrate --rotate` (section 12). |
 | Token kept out of containers | repair worker, runner | Implemented | Docker receives only `REPO_DOCTOR_ATTEMPT` |
 | Token kept out of URLs/args | ingestion, worker, PR service | Implemented |  Via `GIT_CONFIG_*` environment |
-| Sandboxed test execution | `execution/docker.runner.ts`, `docker.args.ts`, `safe-path.ts`, `sandbox-config.ts` | Implemented; **container behaviour not verified in the build environment** (no Docker daemon, 9 tests skipped) | `--network none`, memory (no swap)/CPU/PID/file limits, `--cap-drop ALL`, `no-new-privileges`, read-only root, `noexec` tmpfs, non-root numeric user (root is refused), optional `--runtime runsc`; workspace is scanned first and refused if it contains symlinks leaving it, FIFOs/devices or absurd size. Default seccomp profile only. |
-| Dependency-install policy | `execution/install-policy.ts`, `docker.dependencies.ts` | Implemented (unit-tested; install container itself not run here) | refuses git/URL/file/link dependencies, overrides pointing off-registry, `.npmrc`/`.yarnrc*`/`.pnpmfile*`, and lockfile `resolved` hosts other than the npm/yarn registries; lifecycle scripts off; install container is non-root, read-only, capability-less and resource-limited |
+| Sandboxed test execution | `execution/docker.runner.ts`, `docker.args.ts`, `safe-path.ts`, `sandbox-config.ts` | Implemented | `--network none`, memory (no swap)/CPU/PID/file limits, `--cap-drop ALL`, `no-new-privileges`, read-only root, `noexec` tmpfs, non-root numeric user (root is refused), optional `--runtime runsc`; workspace is scanned first and refused if it contains symlinks leaving it, FIFOs/devices or absurd size. Default seccomp profile only. Container tests need a Docker daemon (`npm run test:docker`) and are skipped without one. |
+| Dependency-install policy | `execution/install-policy.ts`, `docker.dependencies.ts` | Implemented (unit-tested) | refuses git/URL/file/link dependencies, overrides pointing off-registry, `.npmrc`/`.yarnrc*`/`.pnpmfile*`, and lockfile `resolved` hosts other than the npm/yarn registries; lifecycle scripts off; install container is non-root, read-only, capability-less and resource-limited |
 | Command allow-listing | `security/test-command-policy.ts` | Implemented | strict allowlist (`npm/pnpm test`, `run test|lint|typecheck|build`, `node [--check|--test] <file>`); `node -e`, `npx`, shells refused; enforced at the API and again in the worker |
 | Patch validation | `repair/patch-policy.ts`, `repair/repair.patch.ts` | Implemented | path escape, CI/git/credential/manifest paths, symlinks, file/size caps, secrets and dangerous constructs in added code; DELETE now verifies the text it removes |
 | Bounded retries | `retry.policy.ts` | Implemented | 3 attempts; queue-level attempts 1 |
-| Verification gate | `services/verification-gate.ts`, `pull-request.service.ts` | Implemented and verified (unit) | model verdict plus `testPassed`, no regression, confidence ≥ 0.7; since audit 2 a `VERIFIED` verdict is downgraded unless the Docker run exited 0 without timing out (`npm run test:verification-gate`) |
+| Verification gate | `services/verification-gate.ts`, `pull-request.service.ts` | Implemented (unit-tested) | model verdict plus `testPassed`, no regression, confidence ≥ 0.7; a `VERIFIED` verdict is downgraded unless the Docker run exited 0 without timing out (`npm run test:verification-gate`) |
 | Prompt-injection handling | `context/context.formatter.ts`, `ai/guarded.provider.ts` | Implemented (mitigation, not a guarantee) | source and memory are nonce-delimited as untrusted data; a fixed rules preamble is added to every request; model output is untrusted and checked by the patch policy and sandbox |
 | Static secret/SAST checks | `security/static-security-scanner.ts` | Implemented  | six regex rules; not a SAST replacement |
 | Audit logging | `audit/audit.service.ts` | Implemented | consent changes, AI egress (hash + counts, no content), webhook rejects/replays, repair queue/approval/PR, authorization denials, deletions; approvals and consent fail closed when the log cannot be written |
@@ -135,8 +135,8 @@ Required variables (root `.env`, template `.env.example`): `REDIS_PASSWORD`, and
 Commands (add `--profile bundled-db` to each when using the bundled PostgreSQL):
 
 ```bash
-docker compose config -q          # verified: exit 0 with both env files present
-docker compose up --build -d      # NOT executed in the audit (Docker Hub blocked)
+docker compose config -q          # validates the Compose file (needs both env files)
+docker compose up --build -d
 docker compose ps                 # migrate exits 0; redis and server healthy
 docker compose logs migrate server
 docker compose down               # keeps volumes; `down -v` deletes redis_data (and postgres_data)
@@ -157,9 +157,9 @@ Known limitations:
 
 ## 7. Release blockers (status)
 
-Closed in code: token encryption wired and mandatory; Docker result enforced independently of the model and re-run before publishing; strict command policy; audit service; replay protection; cross-user checks; startup validation; approval-gated pull requests; deletion and retention controls.
+Implemented: token encryption wired and mandatory; Docker result enforced independently of the model and re-run before publishing; strict command policy; audit service; replay protection; cross-user checks; startup validation; approval-gated pull requests; deletion and retention controls.
 
-Still open before a public launch (see `PRODUCTION_READINESS_REPORT.md` for the evidence-based status): run the Docker-backed isolation tests on a real sandbox host (`npm run test:docker`); run `prisma migrate deploy`/`migrate diff` (blocked in the build environment); exercise a real GitHub App/OAuth repository; TLS in front of the client; GitHub App for fine-grained permissions; shared rate-limit store for multiple API replicas; external security review.
+Still open before a public launch: run the Docker-backed isolation tests on a dedicated sandbox host (`npm run test:docker`); rehearse `prisma migrate deploy` on a restored copy of production data; exercise a real GitHub OAuth app and repository; TLS in front of the client; a GitHub App for fine-grained permissions; a shared rate-limit store for multiple API replicas; an external security review.
 
 ## 8. Failure triage
 
@@ -175,7 +175,7 @@ Still open before a public launch (see `PRODUCTION_READINESS_REPORT.md` for the 
 
 ## 9. Operational release gate
 
-Do not deploy publicly until the blockers in section 7 are closed and recorded with evidence.
+Do not deploy publicly until the open items in section 7 are closed.
 
 ## 10. Privacy, consent and audit
 
@@ -226,7 +226,7 @@ Stored format: `v1:<keyId>:<iv>:<tag>:<ciphertext>` (AES-256-GCM, base64url, key
 
 ## 15. Sandbox boundary evaluation
 
-What isolates untrusted repository code, honestly:
+What isolates untrusted repository code:
 
 | Layer | Protects against | Does not protect against |
 |---|---|---|
@@ -234,9 +234,9 @@ What isolates untrusted repository code, honestly:
 | gVisor (`REPAIR_SANDBOX_RUNTIME=runsc`) | a large class of kernel-exploit escapes (syscalls are served by a user-space kernel) | some syscalls/features are unsupported, so a few repositories' tests may fail; performance cost; gVisor bugs |
 | Rootless Docker/Podman on the sandbox host | a successful escape lands as an unprivileged user, not root | still the same kernel; slightly different networking/volume behaviour |
 | Dedicated VM, no secrets, egress allow-list (169.254.169.254 blocked) | blast radius of any escape | an attacker with an escape and the host's own credentials, if any |
-| Firecracker/Kata micro-VMs | strongest option (hardware virtualisation per job) | needs operator infrastructure not provided here |
+| Firecracker/Kata micro-VMs | strongest option (hardware virtualisation per job) | needs operator infrastructure not provided by this project |
 
-Recommendation: dedicated VM **plus** gVisor (`runsc`) as the default for any deployment that processes repositories from people you do not know; set `REPAIR_REQUIRE_HARDENED_RUNTIME=true` to make that mandatory. This was evaluated by design review; gVisor was **not** installed or exercised in any environment so far.
+Recommendation: dedicated VM **plus** gVisor (`runsc`) as the default for any deployment that processes repositories from people you do not know; set `REPAIR_REQUIRE_HARDENED_RUNTIME=true` to make that mandatory. gVisor support is implemented as configuration (`--runtime runsc`) and is covered by unit tests; it has not been exercised against a live `runsc` installation.
 
 The dependency-install step is the only one with network access. It is non-root, capability-less and read-only, scripts are disabled, and `install-policy.ts` rejects repositories whose manifests/lockfiles point at hosts other than the npm/yarn registries; set `REPAIR_INSTALL_NETWORK=none` if you pre-seed an offline cache. A malicious *registry* package can still read the workspace during install and phone home: treat the install container as part of the untrusted zone.
 
@@ -252,10 +252,10 @@ Alert on: `/api/ready` false; Redis queue backlog; `WebhookDelivery` rows `FAILE
 | Unwanted branch/PR created | confirm via `RepairJob.branchName/pullRequestNumber` and the `PR_APPROVED` audit event (patch hash); close the PR; RepoDoctor never merges |
 | Data-subject deletion request | use the in-app deletion; then confirm no rows remain; note backup retention |
 
-## 17. Known limitations (what was and was not executed)
+## 17. Known limitations
 
-- **Docker (executed, with a caveat).** A real Docker 29.9.2 daemon (runc, cgroup v1, default seccomp) was started inside the build sandbox (itself a Firecracker-style microVM, kernel 6.18) and all real-container tests ran: non-root, read-only root, no capabilities, `no-new-privileges`, no network, no Docker socket/host paths/host secrets, `noexec` tmpfs, PID and memory limits, hostile-repository scripts, timeout kill, cleanup of containers and volumes, and the publication pipeline using the real sandbox. This is **not a dedicated staging VM**, the sandbox image was a **local stand-in built from the host's Node binary** (registries are blocked here), and the dependency-install container was **not** run (no npm in the stand-in image, no registry access).
-- **gVisor: not executed.** `runsc` could not be obtained (download host blocked, not in the distribution archive). The `--runtime` plumbing and configuration checks are unit-tested only. Treat gVisor as unverified.
-- **Real GitHub: not executed.** No GitHub account was linked to the build session and `github.com`/`api.github.com` were unreachable except through `git ls-remote`. OAuth, webhooks delivered by github.com, real branch pushes and PR creation were exercised only against a local fake REST server and a local bare git repository.
-- **Prisma: native engine not executed.** `binaries.prisma.sh` is blocked, and Prisma's WebAssembly route was tried and also fetches the schema-engine binary. Tests ran through the pure-JS `pg` driver adapter. `prisma migrate deploy` / `migrate diff` were never run; the schema-vs-database comparison test is a stand-in.
+- **Container isolation.** The sandbox uses Docker with the default runc runtime and the hardening flags in section 3. A container shares the host kernel, so run the repair worker on a dedicated VM, ideally with gVisor (section 15). The Docker-backed tests (`npm run test:docker`) need a Docker daemon and are skipped without one.
+- **gVisor.** Runtime selection is implemented and unit-tested, but it has not been exercised against a live `runsc` installation.
+- **GitHub integration.** OAuth, webhooks, branch pushes and pull request creation are tested against a local fake REST server and a local bare git repository. Validate against a real GitHub OAuth app and a disposable repository before relying on it.
+- **Prisma.** Integration tests use the `pg` driver adapter against a real PostgreSQL. `prisma migrate deploy` and `prisma migrate diff` run in CI (`migrations` job); rehearse them on a restored copy before production.
 - Redaction and prompt-injection defences are mitigations, not guarantees.

@@ -83,5 +83,8 @@
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "yaml": "^2.9.1"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.2"
   }
 }

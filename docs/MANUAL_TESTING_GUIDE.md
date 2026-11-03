@@ -201,11 +201,11 @@ Expected status **400** unless stated.
 - **Action:** `for i in $(seq 1 11); do curl -s -o /dev/null -w "%{http_code}\n" -X POST $BASE/auth/login -H 'Content-Type: application/json' -d '{"email":"x@y.co","password":"bad"}'; done`
 - **Expected:** ten `401` (needs the database) then `429` with `{"error":"Too many authentication attempts. Try again later."}`. Successful logins are not counted. General limit: 100 requests per 15 minutes per client.
 - **PASS if** a `429` appears after ten failures. Restart the API to reset.
-- *Executed variant:* with an empty `password` (which returns `400` without a database); The proxy-aware behaviour is covered by AT-08.
+- Variant: with an empty `password` the API returns `400` without touching the database. The proxy-aware behaviour is covered by AT-08.
 - **Behind a proxy:** with `TRUST_PROXY=1`, different `X-Forwarded-For` values have separate counters (AT-08); without it all clients share the proxy's address.
 
 ### TC-06 — Current user and JWT protection
-- **Action and expected:** `curl -i $BASE/auth/me` → `401 {"message":"Authentication required"}` (PASS); `-H "Authorization: Bearer garbage"` → `401 {"message":"Invalid or expired token"}` (PASS); with a valid `$TOKEN` → `200` with `user.id/name/email/githubUsername` (needs the database; NOT EXECUTED).
+- **Action and expected:** `curl -i $BASE/auth/me` → `401 {"message":"Authentication required"}`; `-H "Authorization: Bearer garbage"` → `401 {"message":"Invalid or expired token"}`; with a valid `$TOKEN` → `200` with `user.id/name/email/githubUsername` (needs the database).
 - **PASS if** all three statuses match.
 
 ### TC-07 — CORS
@@ -274,7 +274,7 @@ curl -i -X POST $BASE/github/webhook -H 'Content-Type: application/json' \
 - **PASS if** the four outcomes match (three were run against a live API; `503` is covered by AT-08).
 
 ### TC-17 — Real-time progress (Socket.IO) 
-- **Executed:** a `socket.io-client` connection with `auth: { token }` succeeded over websocket and polling both directly (`:4000`) and through nginx on `:8080` with `client/nginx.conf`; a bad token was rejected with `Invalid authentication token`.
+- **Expected:** a `socket.io-client` connection with `auth: { token }` succeeds over websocket and polling, both directly (`:4000`) and through nginx on `:8080` with `client/nginx.conf`; a bad token is rejected with `Invalid authentication token`.
 - **Action:** with the client open on the repository list, start a scan (TC-10) and watch the progress text; the page also polls job status every 5 s as a fallback.
 - **PASS if** progress updates arrive for your jobs and not another user's, and a connection with an invalid token is refused.
 

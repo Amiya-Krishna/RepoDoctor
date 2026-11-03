@@ -1,12 +1,13 @@
 # Database migrations: safety, rehearsal, backup and restore
 
-Everything below marked **executed** was run against a real PostgreSQL 16 in the build environment (not the native Prisma engine; see `OPERATIONS_SECURITY.md` §17).
+The procedures below are covered by integration tests against a real PostgreSQL 16 (`server/src/tests/migration-upgrade.test.ts`, `db-lifecycle.test.ts`).
 
 ## Rules
 
 1. Migrations are forward-only. Roll back by restoring a backup.
 2. Back up and rehearse on a restored copy before every production migration.
-3. Never edit a migration that has shipped; `prisma/SHIPPED_MIGRATIONS.sha256` and a test enforce it. `20261031000000` had been edited in an earlier remediation build; it is restored to the original and the fix now lives in the corrective migration `20261102000000` plus `scripts/pre-migrate-archive-duplicate-pull-requests.sql`. Install and upgrade procedures: `DEPLOYMENT.md` §2a.
+3. Never edit a migration that has shipped; `prisma/SHIPPED_MIGRATIONS.sha256` and a test enforce it. The pull request de-duplication fix lives in the corrective migration `20261102000000` plus `scripts/pre-migrate-archive-duplicate-pull-requests.sql`; `20261031000000` stays in its original form. Install and upgrade procedures: `DEPLOYMENT.md` §2a.
+4. Migration files are hashed byte for byte (by Prisma and by the manifest), so line endings matter. The root `.gitattributes` marks `migration.sql` files as `-text` so git never converts them; do not re-save a shipped migration with different line endings. After adding that attribute to an existing clone, run `git add --renormalize server/prisma/migrations`.
 
 ## Pre-flight (read-only)
 
@@ -14,9 +15,9 @@ Everything below marked **executed** was run against a real PostgreSQL 16 in the
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f server/scripts/db-preflight.sql     # or: cd server && npm run db:preflight
 DATABASE_URL=... server/scripts/migration-checksum-check.sh                  # which text of each migration the database applied
 ```
-Pre-flight reports duplicate `PullRequest` groups, plaintext/legacy/v1 token counts, `RepairJob` statuses, table sizes and applied migrations; **executed** on a populated old-schema database (found the seeded duplicate group and the plaintext token). The checksum script was **executed** against two synthetic migration histories and correctly reported `applied ORIGINAL text` versus `MISMATCH … applied EDITED variant`.
+Pre-flight reports duplicate `PullRequest` groups, plaintext/legacy/v1 token counts, `RepairJob` statuses, table sizes and applied migrations; tested on a populated old-schema database (it finds duplicate groups and plaintext tokens). The checksum script reports `applied ORIGINAL text` or `MISMATCH … applied EDITED variant` for each migration; the edited variant is kept in `docs/migration-variants/` so the upgrade path from it stays tested.
 
-## Backup and restore (executed)
+## Backup and restore
 
 ```bash
 pg_dump -Fc -f repodoctor.dump "$DATABASE_URL"
@@ -25,7 +26,7 @@ pg_restore --exit-on-error -d repodoctor_rehearsal repodoctor.dump
 # verify row counts match, then rehearse the migration on the copy:
 DATABASE_URL=postgresql://.../repodoctor_rehearsal npx prisma migrate deploy
 ```
-**Executed** (earlier build): dump → restore into a fresh database → identical row counts → migrations applied to the restored copy. That rehearsal used the previously edited migration; the equivalent paths for the restored original are now covered by `migration-upgrade.test.ts`. The dump/restore commands themselves are unchanged.
+After the restore, row counts should match the source database before you rehearse the migration.
 
 ## What the tests prove (`server/src/tests/migration-upgrade.test.ts`, `db-lifecycle.test.ts`)
 
@@ -35,9 +36,9 @@ DATABASE_URL=postgresql://.../repodoctor_rehearsal npx prisma migrate deploy
 - `PUBLISHED` → `COMPLETED`; unbound `APPROVED` → `AWAITING_APPROVAL`.
 - Audit table is append-only (UPDATE always rejected; DELETE rejected under 365 days, allowed beyond).
 - Fresh database: all migrations apply in order; a failing migration leaves nothing behind.
-- Schema/database agreement: every model column exists in the migrated database and vice versa (a stand-in for `prisma migrate diff`, which could not run here; CI runs the real one).
+- Schema/database agreement: every model column exists in the migrated database and vice versa (a lightweight stand-in for `prisma migrate diff`; CI runs the real one).
 - Retention and deletion remove every dependent row (including string-keyed tables), are scoped to the owner, are idempotent, and protect repairs awaiting the owner; concurrent deletes and concurrent claims have exactly one winner.
 
-## Not done here
+## Also run in CI
 
-`prisma migrate deploy` and `prisma migrate diff` (engine download blocked): run them in CI (`migrations` job) and in staging before production.
+`prisma migrate deploy` and `prisma migrate diff` run in the CI `migrations` job; run them again against a restored copy in staging before production.

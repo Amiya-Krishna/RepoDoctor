@@ -2,7 +2,7 @@
 
 Express 5 + TypeScript (ESM/NodeNext) backend for [RepoDoctor AI](../README.md): REST API, Socket.IO gateway, BullMQ workers, AI agents, repair loop and GitHub integration. Database is **PostgreSQL via Prisma**.
 
-> Status labels follow the [development history](../docs/DEVELOPMENT_HISTORY.md#12-status-labels-used-identically-in-every-document).
+> Feature status (Implemented / Partially implemented / Planned) is summarised in the [root README](../README.md#implementation-status).
 
 ## Notes
 

@@ -12,9 +12,12 @@ ENV VITE_API_URL=$VITE_API_URL
 
 RUN npm run build
 
-FROM nginx:alpine AS production
+# Unprivileged nginx: runs as UID 101 and listens on 8080 (no root, no NET_BIND_SERVICE needed).
+FROM nginxinc/nginx-unprivileged:alpine AS production
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
-EXPOSE 80
+USER nginx
+
+EXPOSE 8080
