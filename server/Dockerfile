@@ -1,5 +1,5 @@
 
-FROM node:22-bookworm-slim AS build
+FROM node:25-bookworm-slim AS build
 
 # Prisma detects the OpenSSL version with the `openssl` binary, which the slim image
 # lacks; without it the client/engines can be generated for the wrong platform.
@@ -18,7 +18,7 @@ COPY . .
 RUN npx prisma generate
 RUN npm run build
 
-FROM node:22-bookworm-slim AS production
+FROM node:25-bookworm-slim AS production
 
 ENV NODE_ENV=production
 WORKDIR /app
