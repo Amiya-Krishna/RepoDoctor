@@ -146,9 +146,23 @@ const start = async () => {
     });
   });
 
+  let lastWorkerError = "";
   worker.on("error", (error) => {
-    console.error("Repository scan worker error", error.message);
+    if (error.message !== lastWorkerError) {
+      lastWorkerError = error.message;
+      console.error("Repository scan worker error:", error.message);
+    }
   });
+
+  await Promise.race([
+    worker.waitUntilReady(),
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Timeout connecting to Redis (5000ms). Check REDIS_HOST, REDIS_PORT, REDIS_PASSWORD.")),
+        5000,
+      )
+    ),
+  ]);
 
   const shutdown = async () => {
     stopScheduler();

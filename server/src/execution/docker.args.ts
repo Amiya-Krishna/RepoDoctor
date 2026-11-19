@@ -35,7 +35,12 @@ export function buildSandboxRunArgs(
   const repositoryPath = path.resolve(input.repositoryPath);
 
   if (input.testCommand.length === 0) throw new Error("Docker test command cannot be empty.");
-  if (!path.isAbsolute(repositoryPath) || repositoryPath === "/" || repositoryPath.includes(",") || repositoryPath.includes(":")) {
+  const pathWithoutWindowsDrive =
+    process.platform === "win32" && /^[a-zA-Z]:/.test(repositoryPath)
+      ? repositoryPath.slice(2)
+      : repositoryPath;
+  const isRoot = repositoryPath === "/" || repositoryPath === "\\" || /^[a-zA-Z]:\\?$/.test(repositoryPath);
+  if (!path.isAbsolute(repositoryPath) || isRoot || repositoryPath.includes(",") || pathWithoutWindowsDrive.includes(":")) {
     throw new Error("Refusing to mount an unsafe repository path into the sandbox.");
   }
 

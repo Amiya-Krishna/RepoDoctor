@@ -10,8 +10,8 @@ async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 export const readinessHandler = async (_req: Request, res: Response) => {
   const checks: Record<string, "ok" | "fail"> = {};
   await Promise.all([
-    withTimeout(prisma.$queryRaw`SELECT 1`, 3000).then(() => { checks.database = "ok"; }, () => { checks.database = "fail"; }),
-    withTimeout(scanQueue.waitUntilReady(), 3000).then(() => { checks.redis = "ok"; }, () => { checks.redis = "fail"; }),
+    withTimeout(prisma.$queryRaw`SELECT 1`, 5000).then(() => { checks.database = "ok"; }, () => { checks.database = "fail"; }),
+    withTimeout(scanQueue.waitUntilReady(), 5000).then(() => { checks.redis = "ok"; }, () => { checks.redis = "fail"; }),
   ]);
   const ready = Object.values(checks).every((v) => v === "ok");
   res.status(ready ? 200 : 503).json({ ready, checks });

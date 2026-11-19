@@ -38,7 +38,7 @@ test("scratch space is tmpfs with noexec; only the disposable workspace is mount
   const a = args();
   assert.ok(a.some((x) => x.startsWith("/tmp:rw,noexec,nosuid")));
   const mounts = a.flatMap((x, i) => (a[i - 1] === "-v" ? [x] : []));
-  assert.deepEqual(mounts, [`${base.repositoryPath}:/workspace/repository:rw`]);
+  assert.deepEqual(mounts, [`${path.resolve(base.repositoryPath)}:/workspace/repository:rw`]);
 });
 
 test("no dangerous flags can appear", () => {

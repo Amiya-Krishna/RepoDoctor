@@ -244,7 +244,23 @@ const start = async () => {
       message: error.message,
     });
   });
-  worker.on("error", (error) => console.error("Autonomous repair worker error", error.message));
+  let lastRepairWorkerError = "";
+  worker.on("error", (error) => {
+    if (error.message !== lastRepairWorkerError) {
+      lastRepairWorkerError = error.message;
+      console.error("Autonomous repair worker error:", error.message);
+    }
+  });
+
+  await Promise.race([
+    worker.waitUntilReady(),
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Timeout connecting to Redis (5000ms). Check REDIS_HOST, REDIS_PORT, REDIS_PASSWORD.")),
+        5000,
+      )
+    ),
+  ]);
 
   const shutdown = async () => {
     clearInterval(recoveryTimer);

@@ -60,6 +60,7 @@ process.on("unhandledRejection", (reason) => {
 });
 
 startServer().catch((error) => {
+  console.error("[RepoDoctor] Backend startup failed:", error instanceof Error ? error.message : error);
   log("error", "startup_failed", { reason: error instanceof Error ? error.message : String(error) });
   process.exit(1);
 });

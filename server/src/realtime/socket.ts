@@ -76,7 +76,15 @@ export async function initRealtime(httpServer: HttpServer): Promise<Server> {
   });
 
   scanEvents = new QueueEvents(SCAN_QUEUE_NAME, { connection: redisConnection });
-  await scanEvents.waitUntilReady();
+  scanEvents.on("error", (err) => {
+    console.error("Realtime scan queue events error:", err.message);
+  });
+  await Promise.race([
+    scanEvents.waitUntilReady(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Timeout connecting to Redis for scan events (5000ms). Check REDIS_HOST, REDIS_PORT, REDIS_PASSWORD.")), 5000)
+    ),
+  ]);
 
   scanEvents.on("progress", ({ jobId, data }) => {
     const progress = parseProgress(data);
@@ -127,7 +135,15 @@ export async function initRealtime(httpServer: HttpServer): Promise<Server> {
   });
 
   repairEvents = new QueueEvents(REPAIR_QUEUE_NAME, { connection: redisConnection });
-  await repairEvents.waitUntilReady();
+  repairEvents.on("error", (err) => {
+    console.error("Realtime repair queue events error:", err.message);
+  });
+  await Promise.race([
+    repairEvents.waitUntilReady(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Timeout connecting to Redis for repair events (5000ms). Check REDIS_HOST, REDIS_PORT, REDIS_PASSWORD.")), 5000)
+    ),
+  ]);
 
   repairEvents.on("progress", ({ jobId, data }) => {
     const progress = parseProgress(data);

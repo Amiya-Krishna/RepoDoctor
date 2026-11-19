@@ -52,6 +52,11 @@ app.use(express.json({
 }));
 
 app.get("/api/ready", readinessHandler);
+app.get("/ready", readinessHandler);
+
+app.get("/health", (_req, res) => {
+  res.redirect("/api/health");
+});
 
 app.get("/api/health", (_req, res) => {
   res.status(200).json({
