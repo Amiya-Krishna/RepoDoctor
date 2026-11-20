@@ -29,9 +29,13 @@ const getLanguage = (filePath: string) => {
     case ".tsx":
       return "typescript-react";
     case ".js":
+    case ".mjs":
+    case ".cjs":
       return "javascript";
     case ".jsx":
       return "javascript-react";
+    case ".json":
+      return "json";
     default:
       return "unknown";
   }
@@ -103,6 +107,7 @@ export const buildRepositoryContext = async (
     language?: string;
     framework?: string;
     packageManager?: string;
+    moduleSystem?: "ESM" | "CommonJS" | "unknown";
   } = {}
 ): Promise<RepositoryContext> => {
   const files: ContextFile[] = [];
@@ -113,12 +118,33 @@ export const buildRepositoryContext = async (
     files
   );
 
+  let moduleSystem: "ESM" | "CommonJS" | "unknown" = metadata.moduleSystem ?? "unknown";
+  if (moduleSystem === "unknown") {
+    try {
+      const packageJsonFile = files.find((f) => f.path === "package.json") ||
+        files.find((f) => f.path.endsWith("/package.json"));
+      if (packageJsonFile) {
+        const pkg = JSON.parse(packageJsonFile.content);
+        moduleSystem = pkg.type === "module" ? "ESM" : "CommonJS";
+      } else {
+        const rawPkg = await fs.readFile(path.join(workspacePath, "package.json"), "utf-8").catch(() => null);
+        if (rawPkg) {
+          const pkg = JSON.parse(rawPkg);
+          moduleSystem = pkg.type === "module" ? "ESM" : "CommonJS";
+        }
+      }
+    } catch {
+      moduleSystem = "unknown";
+    }
+  }
+
   return {
     repositoryId,
-    projectType: metadata.projectType,
+    projectType: metadata.projectType ?? "node",
     language: metadata.language,
     framework: metadata.framework,
     packageManager: metadata.packageManager,
+    moduleSystem,
     files,
   };
 };

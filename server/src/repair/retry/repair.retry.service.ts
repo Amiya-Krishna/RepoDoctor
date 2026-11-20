@@ -30,11 +30,12 @@ import {
 
 import { DEFAULT_RETRY_POLICY, canRetry } from "./retry.policy.js";
 
-import { buildReplanningContext } from "./retry.replanner.js";
+import { buildReplanningContext, extractErrorDiagnostic, type PriorFailure } from "./retry.replanner.js";
 
 import type { BugFinding } from "../../agents/bug-detection.types.js";
 import type { SecurityFinding } from "../../agents/security.types.js";
 import type { VerificationResult } from "../../agents/verification.types.js";
+import type { FixResult } from "../../agents/fix.types.js";
 import type { DockerTestResult } from "../../execution/docker.types.js";
 import type { RetryAttemptResult, RetryLoopResult } from "./retry.types.js";
 import type { RepairWorkspace } from "../repair.types.js";
@@ -75,10 +76,12 @@ export const runRepairRetryLoop = async (
   const fixAgent = new FixAgent(aiProvider);
 
   const attempts: RetryAttemptResult[] = [];
+  const priorFailures: PriorFailure[] = [];
 
   let previousTestResult: DockerTestResult | undefined;
   let previousVerification: VerificationResult | undefined;
   let previousPatchError: string | undefined;
+  let previousFixResult: FixResult | undefined;
 
   for (
     let attemptNumber = 1;
@@ -142,6 +145,8 @@ export const runRepairRetryLoop = async (
           attemptNumber,
           previousTestResult,
           previousVerification,
+          previousFixResult,
+          priorFailures,
         });
 
         retryFinding = {
@@ -169,6 +174,7 @@ export const runRepairRetryLoop = async (
         repositoryContext,
         formattedContext,
       );
+      previousFixResult = fixResult;
       await onProgress?.("fix-generated", `Generated fix proposal for attempt ${attemptNumber}`, 40 + (attemptNumber - 1) * 15);
 
       const source =
@@ -360,13 +366,21 @@ export const runRepairRetryLoop = async (
       /*
        * FAILED or ERROR becomes replanning evidence.
        */
+      const diagnostic = extractErrorDiagnostic(testResult, verification);
+      const failureExplanation = `${diagnostic.summary} ${diagnostic.actionableGuidance.split("\n")[0]}`;
+      priorFailures.push({
+        attemptNumber,
+        errorSummary: diagnostic.summary,
+        patchSummary: fixResult.summary,
+      });
+
       await updateRepairAttempt(attempt.id, {
         status:
           verification.status === "FAILED" ? "VERIFICATION_FAILED" : "ERROR",
         fixProposalId: proposal.id,
         dockerTestRunId: dockerTestRun.id,
         verificationResultId: verificationRecord.id,
-        failureReason: verification.summary,
+        failureReason: failureExplanation,
       });
 
       attempts.push({
@@ -376,7 +390,7 @@ export const runRepairRetryLoop = async (
         fixProposalId: proposal.id,
         dockerTestRunId: dockerTestRun.id,
         verificationResultId: verificationRecord.id,
-        summary: verification.summary,
+        summary: failureExplanation,
       });
 
       previousTestResult = testResult;

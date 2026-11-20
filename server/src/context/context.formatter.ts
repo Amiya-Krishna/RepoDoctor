@@ -35,6 +35,12 @@ export const formatRepositoryContext = (
     );
   }
 
+  if (context.moduleSystem && context.moduleSystem !== "unknown") {
+    sections.push(
+      `Module System: ${context.moduleSystem === "ESM" ? "ES Modules (package.json has \"type\": \"module\" - use `export`/`import`, NEVER `module.exports`)" : "CommonJS"}`
+    );
+  }
+
   sections.push("\nALLOWED TARGET FILE PATHS:\n");
 
   for (const file of context.files) {

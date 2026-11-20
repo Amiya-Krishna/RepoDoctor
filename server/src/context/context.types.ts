@@ -11,5 +11,6 @@ export interface RepositoryContext {
   language?: string;
   framework?: string;
   packageManager?: string;
+  moduleSystem?: "ESM" | "CommonJS" | "unknown";
   files: ContextFile[];
 }

@@ -67,6 +67,9 @@ ${context.framework ?? "unknown"}
 Package manager:
 ${context.packageManager ?? "unknown"}
 
+Module system:
+${context.moduleSystem === "ESM" ? "ES Modules (package.json has \"type\": \"module\" - use `export`/`import`, NEVER `module.exports`)" : (context.moduleSystem ?? "unknown")}
+
 REPOSITORY CONTEXT:
 
 ${formattedContext}

@@ -33,6 +33,23 @@ IMPORTANT SAFETY RULES:
 24. Do not include markdown code fences inside replacementCode.
 25. confidence must be between 0 and 1.
 
+MODULE SYSTEM AND TEST RULES:
+26. Always inspect package.json and project module configuration before writing code.
+27. When the project uses ES Modules ("type": "module" in package.json or .mjs files):
+    - All exports in JavaScript/TypeScript files MUST use ES Module syntax:
+      'export function name(...) { ... }' or 'export { name }' or 'export default ...'.
+    - NEVER output CommonJS syntax ('module.exports = ...' or 'exports.name = ...' or 'require(...)')
+      in an ES Module project. CommonJS is completely incompatible with Node.js ESM and causes
+      fatal SyntaxError crashes at runtime.
+28. Match test imports with source exports:
+    - If a test imports named exports (e.g. import { add, subtract } from "./src/utils.js"),
+      the target file MUST provide compatible named exports ('export function add(...)', 'export function subtract(...)').
+    - If a test imports a default export (e.g. import utils from "./src/utils.js"),
+      the target file must provide 'export default'.
+29. Fix the underlying implementation in source files to satisfy tests.
+    NEVER weaken, delete, or skip tests just to produce a passing result.
+30. Do not alter the project's module system or package.json unless the finding specifically requires it.
+
 The proposed fix should contain:
 
 - title
