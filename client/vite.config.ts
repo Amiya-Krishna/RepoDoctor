@@ -18,6 +18,6 @@ export default defineConfig({
   plugins: [react()],
   // strictPort: fail loudly (instead of silently moving to 8081) when the
   // Docker stack or another process already holds 8080.
-  server: { port: 8080, strictPort: true, proxy },
-  preview: { port: 8080, strictPort: true, proxy },
+  server: { host: true, port: 8080, strictPort: true, proxy },
+  preview: { host: true, port: 8080, strictPort: true, proxy },
 })

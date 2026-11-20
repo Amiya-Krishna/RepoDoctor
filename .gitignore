@@ -13,3 +13,7 @@ bug-test-repo/
 security-test-repo/
 test-generation-repo/
 server/.local-prisma/
+
+# Local process tracking and logs
+.repodoctor-pids.json
+logs/
